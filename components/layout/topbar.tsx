@@ -2,6 +2,7 @@ import Image from "next/image";
 import { LogOut } from "lucide-react";
 import { signOut } from "@/app/actions/auth";
 import type { CurrentEmployee } from "@/server/auth";
+import { AlertBell } from "@/components/layout/alert-bell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -22,6 +23,8 @@ export function Topbar({ employee }: { employee: CurrentEmployee }) {
       </div>
 
       <div className="flex items-center gap-3">
+        <AlertBell appRole={employee.app_role} />
+
         <Badge variant="secondary">{ROLE_LABEL[employee.app_role]}</Badge>
 
         {employee.photo ? (

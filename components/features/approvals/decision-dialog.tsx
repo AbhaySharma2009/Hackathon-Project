@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, Sparkles, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Loader2, ThumbsDown, ThumbsUp } from "lucide-react";
 import { apiFetch, ClientApiError } from "@/shared/api-client";
 import { LEAVE_TYPE_LABEL } from "@/server/leave";
 import type { ApprovalRequest, LeaveRequest } from "@/shared/types";
+import { LeaveImpactPanel } from "@/components/features/approvals/leave-impact-panel";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -165,20 +166,10 @@ export function DecisionDialog({
               </div>
             </dl>
 
-            {/* Phase 6 fills this in with the knock-on effects of the decision
-                (who else is out, coverage risk, trend context). */}
-            <div
-              data-slot="leave-impact"
-              className="flex items-start gap-2 rounded-md border border-dashed p-3 text-sm text-muted-foreground"
-            >
-              <Sparkles className="mt-0.5 size-4 shrink-0" aria-hidden />
-              <div>
-                <p className="font-medium text-foreground">Leave Impact</p>
-                <p className="text-xs">
-                  Team coverage and workload insights will appear here in a later phase.
-                </p>
-              </div>
-            </div>
+            {/* The cost of saying yes: team size, who is already away across
+                these dates, and the risk the database assigns. It is advisory —
+                a failed lookup must not stop the manager deciding. */}
+            {isApprove ? <LeaveImpactPanel requestId={request.id} /> : null}
 
             <div className="space-y-2">
               <Label htmlFor="decision-comment">

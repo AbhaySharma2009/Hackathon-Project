@@ -34,6 +34,7 @@ import {
   LeaveBalanceChart,
   LeaveUsageByDepartmentChart,
 } from "@/components/features/dashboard/charts";
+import { AlertsCard } from "@/components/features/dashboard/alerts-card";
 
 function initials(name: string) {
   return name
@@ -218,6 +219,9 @@ export function HrDashboardClient() {
           hint="Per person, this year"
         />
       </div>
+
+      {/* ---- Alerts ---- */}
+      <AlertsCard />
 
       {/* ---- Charts ---- */}
       <div className="grid gap-4 lg:grid-cols-2">

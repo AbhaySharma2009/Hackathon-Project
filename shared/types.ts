@@ -189,6 +189,23 @@ export type DashboardSummary = {
   department_workforce: DepartmentWorkforce[];
 };
 
+// ---------------------------------------------------------------------------
+// Workforce intelligence (Phase 6)
+//
+// Read-only mirrors of the `get_availability` / `get_leave_impact` payloads. The
+// ratios, the working-day counts and the risk level are all decided in Postgres;
+// the client renders them and never recomputes one.
+// ---------------------------------------------------------------------------
+
+export type AlertSeverity = "info" | "warning" | "critical";
+export type AlertType =
+  | "leave_approved"
+  | "leave_rejected"
+  | "leave_pending"
+  | "balance_low"
+  | "upcoming_leave"
+  | "team_absent";
+
 export type Alert = {
   id: string;
   scope_employee_id: string | null;
@@ -198,6 +215,82 @@ export type Alert = {
   related_date: string | null;
   created_at: string;
   is_read: boolean;
+};
+
+/** One day of the availability grid. Weekends are returned but flagged. */
+export type AvailabilityDay = {
+  /** YYYY-MM-DD. */
+  date: string;
+  is_weekend: boolean;
+  team_size: number;
+  on_leave_count: number;
+  available_count: number;
+  /** 0-100, one decimal. A team of nobody is reported as 100. */
+  availability_pct: number;
+  names_on_leave: string[];
+  ids_on_leave: string[];
+};
+
+/** GET /api/availability */
+export type TeamAvailability = {
+  scope: {
+    app_role: AppRole;
+    /** False when a manager narrowed the view to their own reporting line. */
+    org_wide: boolean;
+    viewer_id: string;
+    /** Which filter actually applied, for the page's own caption. */
+    basis: "team" | "department" | "organisation";
+  };
+  from: string;
+  to: string;
+  generated_at: string;
+  days: AvailabilityDay[];
+  summary: {
+    team_size: number;
+    /** Lowest availability across the working days in range, or 100 if none. */
+    worst_day: AvailabilityDay | null;
+    /** Mean availability over the working days in range. */
+    average_availability_pct: number;
+    days_below_threshold: number;
+  };
+};
+
+/** Someone in the same reporting line who is already away on those dates. */
+export type ImpactOverlap = {
+  employee_id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+  days: number;
+};
+
+/** GET /api/leave-requests/:id/impact */
+export type LeaveImpact = {
+  request_id: string;
+  employee_id: string;
+  employee_name: string;
+  status: LeaveStatus;
+  start_date: string;
+  end_date: string;
+  days: number;
+  /** The reporting line, counting the manager themselves. */
+  team_size: number;
+  already_on_leave: number;
+  overlapping_leave: ImpactOverlap[];
+  working_days: number;
+  /** Earliest working day at the lowest availability, or null if all weekend. */
+  worst_date: string | null;
+  worst_day_availability_pct: number | null;
+  /** low >= 75%, medium >= 50%, high below that. Null when there is no working day. */
+  risk: "low" | "medium" | "high" | null;
+  per_day: AvailabilityDay[];
+};
+
+/** GET /api/alerts */
+export type AlertsFeed = {
+  alerts: Alert[];
+  unread_count: number;
+  generated_at: string;
 };
 
 type Table<Row> = {
@@ -252,6 +345,26 @@ export type Database = {
       get_dashboard_summary: {
         Args: Record<string, never>;
         Returns: DashboardSummary;
+      };
+      is_working_day: { Args: { p_date: string }; Returns: boolean };
+      team_size: { Args: { p_manager_id: string }; Returns: number };
+      get_availability: {
+        Args: {
+          p_from?: string | null;
+          p_to?: string | null;
+          p_department?: string | null;
+          p_manager_id?: string | null;
+        };
+        Returns: AvailabilityDay[];
+      };
+      get_leave_impact: {
+        Args: { p_request_id: string };
+        Returns: LeaveImpact;
+      };
+      /** Service-role only — invoked by POST /api/alerts/refresh. */
+      generate_alerts: {
+        Args: Record<string, never>;
+        Returns: number;
       };
       org_tree_health: {
         Args: Record<string, never>;
