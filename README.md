@@ -1,3 +1,4 @@
+
 # OrgFlow
 
 **Don't just manage employee leave — understand your workforce.**
@@ -336,4 +337,4 @@ npm run lint        # eslint
 npm run typecheck   # tsc --noEmit
 npm test            # RLS integration tests (needs a live Supabase project)
 npm run seed:auth   # create + link the demo auth users
-```
+
