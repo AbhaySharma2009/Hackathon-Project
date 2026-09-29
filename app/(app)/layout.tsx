@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
-import { getCurrentEmployee } from "@/lib/auth";
-import { navForRole } from "@/lib/nav";
+import { getCurrentEmployee } from "@/server/auth";
+import { navForRole } from "@/shared/nav";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 

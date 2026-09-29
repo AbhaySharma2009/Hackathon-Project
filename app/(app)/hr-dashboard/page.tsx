@@ -1,5 +1,5 @@
-import { redirectUnlessRole } from "@/lib/auth";
-import { HrDashboardClient } from "@/components/dashboard/hr-dashboard-client";
+import { redirectUnlessRole } from "@/server/auth";
+import { HrDashboardClient } from "@/components/features/dashboard/hr-dashboard-client";
 
 /**
  * HR sees organisation-wide figures; a manager sees the same dashboard scoped to

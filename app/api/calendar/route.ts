@@ -1,9 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import { toErrorResponse } from "@/lib/api/errors";
-import { parseQuery } from "@/lib/api/parse";
-import { requireSession } from "@/lib/api/session";
-import type { CalendarLeave } from "@/lib/types";
+import { toErrorResponse } from "@/server/api/errors";
+import { parseQuery } from "@/server/api/parse";
+import { requireSession } from "@/server/api/session";
+import type { CalendarLeave } from "@/shared/types";
 
 const calendarQuerySchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/, "Use YYYY-MM for the month."),

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
-import { getCurrentEmployee } from "@/lib/auth";
-import { DirectoryClient } from "@/components/directory/directory-client";
+import { getCurrentEmployee } from "@/server/auth";
+import { DirectoryClient } from "@/components/features/directory/directory-client";
 
 export const metadata = { title: "Directory" };
 

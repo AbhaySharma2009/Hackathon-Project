@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { ApiError, toErrorResponse } from "@/lib/api/errors";
-import { requireRole } from "@/lib/api/session";
-import type { DashboardSummary } from "@/lib/types";
+import { ApiError, toErrorResponse } from "@/server/api/errors";
+import { requireRole } from "@/server/api/session";
+import type { DashboardSummary } from "@/shared/types";
 
 /**
  * GET /api/dashboard/summary

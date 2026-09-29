@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
-import { getCurrentEmployee } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentEmployee } from "@/server/auth";
+import { createClient } from "@/server/supabase/server";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {

@@ -11,8 +11,8 @@ import {
   Users,
   type LucideIcon,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import type { NavIcon, NavItem } from "@/lib/nav";
+import { cn } from "@/shared/utils";
+import type { NavIcon, NavItem } from "@/shared/nav";
 
 /** Resolves the server-supplied icon name to a real component on the client. */
 const ICONS: Record<NavIcon, LucideIcon> = {

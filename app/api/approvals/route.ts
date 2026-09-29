@@ -1,10 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { ApiError, toErrorResponse } from "@/lib/api/errors";
-import { parseQuery } from "@/lib/api/parse";
-import { requireRole } from "@/lib/api/session";
-import { leaveListSchema } from "@/lib/leave";
-import { DIRECTORY_COLUMNS } from "@/lib/employees";
-import type { ApprovalRequest, LeaveRequest } from "@/lib/types";
+import { ApiError, toErrorResponse } from "@/server/api/errors";
+import { parseQuery } from "@/server/api/parse";
+import { requireRole } from "@/server/api/session";
+import { leaveListSchema } from "@/server/leave";
+import { DIRECTORY_COLUMNS } from "@/server/employees";
+import type { ApprovalRequest, LeaveRequest } from "@/shared/types";
 
 /**
  * GET /api/approvals?status=

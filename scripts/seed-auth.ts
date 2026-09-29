@@ -8,7 +8,7 @@
  * Requires SUPABASE_SERVICE_ROLE_KEY (server-side only — never in the browser).
  */
 import { config } from "dotenv";
-import { createAdminClient } from "../lib/supabase/admin-core";
+import { createAdminClient } from "../server/supabase/admin-core";
 
 // Next.js reads .env.local; plain Node does not, so point dotenv at it directly.
 config({ path: ".env.local" });

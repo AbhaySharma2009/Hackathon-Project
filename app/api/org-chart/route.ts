@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { toErrorResponse } from "@/lib/api/errors";
-import { requireSession } from "@/lib/api/session";
-import type { OrgNode } from "@/lib/types";
+import { toErrorResponse } from "@/server/api/errors";
+import { requireSession } from "@/server/api/session";
+import type { OrgNode } from "@/shared/types";
 
 /**
  * GET /api/org-chart

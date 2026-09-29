@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { ApiError, toErrorResponse } from "@/lib/api/errors";
-import { requireHr, requireSession } from "@/lib/api/session";
-import { DIRECTORY_COLUMNS, assertNoManagerCycle, employeeUpdateSchema, parseBody } from "@/lib/employees";
+import { ApiError, toErrorResponse } from "@/server/api/errors";
+import { requireHr, requireSession } from "@/server/api/session";
+import { DIRECTORY_COLUMNS, assertNoManagerCycle, employeeUpdateSchema, parseBody } from "@/server/employees";
 
 type Context = { params: Promise<{ id: string }> };
 

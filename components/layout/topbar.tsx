@@ -1,7 +1,7 @@
 import Image from "next/image";
 import { LogOut } from "lucide-react";
 import { signOut } from "@/app/actions/auth";
-import type { CurrentEmployee } from "@/lib/auth";
+import type { CurrentEmployee } from "@/server/auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 

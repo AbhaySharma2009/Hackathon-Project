@@ -1,4 +1,4 @@
-import { redirectUnlessRole } from "@/lib/auth";
+import { redirectUnlessRole } from "@/server/auth";
 import { PagePlaceholder } from "@/components/layout/page-placeholder";
 
 export default async function TeamAvailabilityPage() {

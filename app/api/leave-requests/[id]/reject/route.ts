@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
-import { toErrorResponse, ApiError } from "@/lib/api/errors";
-import { parseJson, readJson } from "@/lib/api/parse";
-import { requireRole } from "@/lib/api/session";
-import { rejectSchema } from "@/lib/leave";
-import { decideLeave } from "@/lib/leave-decision";
+import { toErrorResponse, ApiError } from "@/server/api/errors";
+import { parseJson, readJson } from "@/server/api/parse";
+import { requireRole } from "@/server/api/session";
+import { rejectSchema } from "@/server/leave";
+import { decideLeave } from "@/server/leave-decision";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

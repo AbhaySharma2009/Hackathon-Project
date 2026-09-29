@@ -1,5 +1,5 @@
-import { redirectUnlessRole } from "@/lib/auth";
-import { ApprovalsClient } from "@/components/approvals/approvals-client";
+import { redirectUnlessRole } from "@/server/auth";
+import { ApprovalsClient } from "@/components/features/approvals/approvals-client";
 
 export const metadata = { title: "Approvals" };
 

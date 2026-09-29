@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { ApiError, toErrorResponse } from "@/lib/api/errors";
-import { requireSession } from "@/lib/api/session";
+import { ApiError, toErrorResponse } from "@/server/api/errors";
+import { requireSession } from "@/server/api/session";
 import { z } from "zod";
 
 const yearSchema = z.coerce.number().int().min(2000).max(2100);

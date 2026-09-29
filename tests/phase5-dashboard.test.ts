@@ -15,8 +15,8 @@
 import { config } from "dotenv";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type SupabaseClient } from "@supabase/supabase-js";
-import { createAdminClient } from "../lib/supabase/admin-core";
-import type { DashboardSummary } from "../lib/types";
+import { createAdminClient } from "../server/supabase/admin-core";
+import type { DashboardSummary } from "../shared/types";
 
 config({ path: ".env.local" });
 config();

@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { toErrorResponse } from "@/lib/api/errors";
-import { parseJson, readJson } from "@/lib/api/parse";
-import { requireSession } from "@/lib/api/session";
-import { leaveRequestSchema } from "@/lib/leave";
+import { toErrorResponse } from "@/server/api/errors";
+import { parseJson, readJson } from "@/server/api/parse";
+import { requireSession } from "@/server/api/session";
+import { leaveRequestSchema } from "@/server/leave";
 
 /**
  * POST /api/leave-requests/validate — dry run, inserts nothing.

@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { parseJson, parseQuery, readJson } from "@/lib/api/parse";
-import { ApiError, toErrorResponse } from "@/lib/api/errors";
-import { requireSession } from "@/lib/api/session";
-import { leaveListSchema, leaveRequestSchema } from "@/lib/leave";
+import { parseJson, parseQuery, readJson } from "@/server/api/parse";
+import { ApiError, toErrorResponse } from "@/server/api/errors";
+import { requireSession } from "@/server/api/session";
+import { leaveListSchema, leaveRequestSchema } from "@/server/leave";
 
 /**
  * GET /api/leave-requests?status=&employee_id=

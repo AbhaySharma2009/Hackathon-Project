@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
-import { getCurrentEmployee } from "@/lib/auth";
-import { OrgChartClient } from "@/components/org-chart/org-chart-client";
+import { getCurrentEmployee } from "@/server/auth";
+import { OrgChartClient } from "@/components/features/org-chart/org-chart-client";
 
 export const metadata = { title: "Org Chart" };
 

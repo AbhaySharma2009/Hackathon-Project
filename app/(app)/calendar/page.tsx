@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
-import { getCurrentEmployee } from "@/lib/auth";
-import { CalendarClient } from "@/components/calendar/calendar-client";
+import { getCurrentEmployee } from "@/server/auth";
+import { CalendarClient } from "@/components/features/calendar/calendar-client";
 
 export const metadata = { title: "Calendar" };
 

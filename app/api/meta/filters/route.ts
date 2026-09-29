@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { toErrorResponse } from "@/lib/api/errors";
-import { requireSession } from "@/lib/api/session";
+import { toErrorResponse } from "@/server/api/errors";
+import { requireSession } from "@/server/api/session";
 
 /**
  * GET /api/meta/filters

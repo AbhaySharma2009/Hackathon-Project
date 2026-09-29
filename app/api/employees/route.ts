@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { ApiError, toErrorResponse } from "@/lib/api/errors";
-import { requireHr, requireSession } from "@/lib/api/session";
+import { ApiError, toErrorResponse } from "@/server/api/errors";
+import { requireHr, requireSession } from "@/server/api/session";
 import {
   DIRECTORY_COLUMNS,
   employeeCreateSchema,
@@ -8,7 +8,7 @@ import {
   parseListQuery,
   queryEmployees,
   withManagerNames,
-} from "@/lib/employees";
+} from "@/server/employees";
 
 /** A missing or malformed body is a validation problem, not a 500. */
 async function readJson(request: Request): Promise<unknown> {

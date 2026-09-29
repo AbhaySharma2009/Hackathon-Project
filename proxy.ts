@@ -1,6 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import type { Database } from "@/lib/types";
+import type { Database } from "@/shared/types";
 
 /**
  * Auth gate for every app route.
