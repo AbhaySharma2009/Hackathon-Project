@@ -12,6 +12,9 @@
     "db:reset-demo": "tsx scripts/reset-demo-data.ts",
     "db:seed-demo": "tsx scripts/seed-demo-data.ts",
     "db:reset-balances": "tsx scripts/reset-balances.ts",
+    "db:apply-sql": "tsx scripts/apply-sql.ts",
+    "verify:demo": "tsx scripts/verify-demo.ts",
+    "verify:approvals": "tsx scripts/verify-approval-hierarchy.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
