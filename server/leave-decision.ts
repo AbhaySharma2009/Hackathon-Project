@@ -43,5 +43,14 @@ export async function decideLeave(
     );
   }
 
-  return NextResponse.json({ data: result.request });
+  return NextResponse.json({
+    data: result.request,
+    // Phase 3.5: the UI needs to know whether the balance has actually been
+    // spent yet. `final_approval: false` means this signature only advanced the
+    // chain and the request is still pending at `awaiting_level`.
+    meta: {
+      final_approval: result.final_approval ?? false,
+      awaiting_level: result.awaiting_level ?? null,
+    },
+  });
 }

@@ -501,6 +501,10 @@ begin
       e.manager_id as scope_id,
       lr.id,
       lr.start_date,
+      -- Exposed explicitly: the alert message below formats this date, and a
+      -- record loop only exposes the columns actually selected. Deriving
+      -- `age_days` from it does not make `created_at` visible.
+      lr.created_at,
       e.name,
       (current_date - lr.created_at::date) as age_days
     from public.leave_requests lr

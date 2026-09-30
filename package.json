@@ -8,6 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "seed:auth": "tsx scripts/seed-auth.ts",
+    "db:backup": "tsx scripts/backup-data.ts",
+    "db:reset-demo": "tsx scripts/reset-demo-data.ts",
+    "db:seed-demo": "tsx scripts/seed-demo-data.ts",
     "db:reset-balances": "tsx scripts/reset-balances.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

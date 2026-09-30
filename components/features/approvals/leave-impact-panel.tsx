@@ -65,7 +65,7 @@ export function LeaveImpactPanel({ requestId }: { requestId: string }) {
       <div
         data-slot="leave-impact"
         data-state="loading"
-        className="flex items-center gap-2 rounded-md border p-3 text-sm text-muted-foreground"
+        className="flex items-center gap-2 rounded-lg border p-3.5 text-sm text-muted-foreground"
       >
         <Loader2 className="size-4 animate-spin" aria-hidden />
         Working out the team impact…
@@ -80,10 +80,10 @@ export function LeaveImpactPanel({ requestId }: { requestId: string }) {
       <div
         data-slot="leave-impact"
         data-state="error"
-        className="rounded-md border border-dashed p-3 text-sm text-muted-foreground"
+        className="rounded-lg border border-dashed p-3.5 text-sm text-muted-foreground"
       >
         <p className="font-medium text-foreground">Leave Impact</p>
-        <p className="text-xs">{state.message}</p>
+        <p className="mt-0.5 text-sm">{state.message}</p>
       </div>
     );
   }
@@ -99,7 +99,7 @@ export function LeaveImpactPanel({ requestId }: { requestId: string }) {
       data-team-size={impact.team_size}
       data-overlap-count={impact.already_on_leave}
       data-worst-pct={impact.worst_day_availability_pct ?? ""}
-      className={`space-y-3 rounded-md border p-3 text-sm ${risk ? RISK_CLASS[risk] : "bg-muted/40"}`}
+      className={`space-y-3.5 rounded-lg border p-3.5 text-sm ${risk ? RISK_CLASS[risk] : "bg-muted/40"}`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="flex items-center gap-2 font-medium">
@@ -117,28 +117,28 @@ export function LeaveImpactPanel({ requestId }: { requestId: string }) {
         ) : null}
       </div>
 
-      <p className="text-xs">{describeImpact(impact)}</p>
+      <p className="leading-relaxed">{describeImpact(impact)}</p>
 
-      <dl className="grid grid-cols-3 gap-2 text-xs">
+      <dl className="grid grid-cols-3 gap-3">
         <div>
-          <dt className="opacity-70">Team size</dt>
-          <dd className="flex items-center gap-1 text-sm font-semibold tabular-nums">
-            <Users className="size-3.5" aria-hidden />
+          <dt className="text-xs opacity-75">Team size</dt>
+          <dd className="tabular mt-0.5 flex items-center gap-1 text-base font-semibold">
+            <Users className="size-4" aria-hidden />
             {impact.team_size}
           </dd>
         </div>
         <div>
-          <dt className="opacity-70">Working days</dt>
-          <dd className="text-sm font-semibold tabular-nums">{impact.working_days}</dd>
+          <dt className="text-xs opacity-75">Working days</dt>
+          <dd className="tabular mt-0.5 text-base font-semibold">{impact.working_days}</dd>
         </div>
         <div>
-          <dt className="opacity-70">Others away</dt>
-          <dd className="text-sm font-semibold tabular-nums">{impact.already_on_leave}</dd>
+          <dt className="text-xs opacity-75">Others away</dt>
+          <dd className="tabular mt-0.5 text-base font-semibold">{impact.already_on_leave}</dd>
         </div>
       </dl>
 
       {impact.overlapping_leave.length > 0 ? (
-        <ul className="space-y-1 text-xs">
+        <ul className="space-y-1.5 border-t pt-3 text-sm">
           {impact.overlapping_leave.map((overlap) => (
             <li key={overlap.employee_id} className="flex justify-between gap-2">
               <span className="font-medium">{overlap.name}</span>
@@ -151,7 +151,7 @@ export function LeaveImpactPanel({ requestId }: { requestId: string }) {
       ) : null}
 
       {impact.worst_date ? (
-        <p className="text-xs">
+        <p className="border-t pt-3 text-sm">
           Tightest day is{" "}
           <span className="font-medium">{formatDate(impact.worst_date)}</span> —{" "}
           <span className="tabular-nums">{impact.worst_day_availability_pct}% available</span>.

@@ -94,6 +94,7 @@ async function getAnnualUsed(admin: SupabaseClient, employeeId: string): Promise
 let employeeClient: SupabaseClient; // Neha
 let managerClient: SupabaseClient; // Sanjay
 let skipLevelClient: SupabaseClient; // Vikram
+let deptHeadClient: SupabaseClient; // Aditya, the Engineering department head
 let hrClient: SupabaseClient; // Rohan
 let admin: SupabaseClient;
 
@@ -102,6 +103,9 @@ beforeAll(async () => {
   employeeClient = await signIn("neha.gupta@orgflow.dev");
   managerClient = await signIn("sanjay.kapoor@orgflow.dev");
   skipLevelClient = await signIn("vikram.sethi@orgflow.dev");
+  // Aditya is the topmost Engineering ancestor, i.e. the department-head step that
+  // a 4+ working day request from Priya escalates to.
+  deptHeadClient = await signIn("aditya.rao@orgflow.dev");
   hrClient = await signIn("rohan.iyer@orgflow.dev");
   admin = createAdminClient();
 
@@ -205,7 +209,17 @@ describe("approve_leave_request", () => {
       .eq("year", new Date().getFullYear())
       .eq("leave_type", "annual");
 
-    const { data, error } = await managerClient.rpc("approve_leave_request", {
+    // Phase 3.5: 5 working days means two levels, so the manager's signature is
+    // mid-chain and deliberately does NOT touch the balance. The check lives on
+    // the FINAL signature, so the chain is walked to the end.
+    const { data: first, error: firstError } = await managerClient.rpc("approve_leave_request", {
+      p_request_id: id,
+      p_comment: "Agreed at my level.",
+    });
+    expect(firstError).toBeNull();
+    expect((first as { ok: boolean }).ok).toBe(true);
+
+    const { data, error } = await deptHeadClient.rpc("approve_leave_request", {
       p_request_id: id,
       p_comment: "Should fail.",
     });

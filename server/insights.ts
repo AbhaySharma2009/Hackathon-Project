@@ -114,10 +114,16 @@ export const RISK_LABEL: Record<RiskLevel, string> = {
   high: "High risk",
 };
 
+/**
+ * Risk styling uses the app's semantic tokens rather than fixed emerald/amber/red,
+ * so it follows the light and dark palettes and stays consistent with the
+ * availability heatmap and the status badges. The risk is always accompanied by
+ * a word (`RISK_LABEL`) and an icon, never by colour alone.
+ */
 export const RISK_CLASS: Record<RiskLevel, string> = {
-  low: "border-emerald-200 bg-emerald-50 text-emerald-900",
-  medium: "border-amber-200 bg-amber-50 text-amber-900",
-  high: "border-red-200 bg-red-50 text-red-900",
+  low: "border-success/40 bg-success/10 text-success-foreground",
+  medium: "border-warning/50 bg-warning/12 text-warning-foreground",
+  high: "border-destructive/45 bg-destructive/10 text-destructive",
 };
 
 /** One-line summary of an impact, for the dialog and for tests to assert on. */

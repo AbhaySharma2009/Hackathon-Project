@@ -20,6 +20,10 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./", import.meta.url)),
+      // `server-only` throws outside a React Server Component, which is the point
+      // in the app but blocks the copilot modules from being imported by a test.
+      // The stub keeps the app's guarantee and lets the suite drive the real code.
+      "server-only": fileURLToPath(new URL("./tests/stubs/server-only.ts", import.meta.url)),
     },
   },
 });

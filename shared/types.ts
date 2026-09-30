@@ -6,8 +6,17 @@
 import type { ErrorCode } from "@/shared/errors";
 
 export type LeaveType = "casual" | "sick" | "annual" | "unpaid";
-export type LeaveStatus = "pending" | "approved" | "rejected" | "cancelled";
+/**
+ * `approval_blocked` is Phase 3.5: the request is real and visible, but no
+ * approval chain could be resolved for it, so it is parked with a reason instead
+ * of being auto-approved. Only HR can move it.
+ */
+export type LeaveStatus = "pending" | "approved" | "rejected" | "cancelled" | "approval_blocked";
 export type AppRole = "employee" | "manager" | "hr";
+
+/** Which signature a step represents. Distinct from `app_role`. */
+export type ApprovalStepRole = "manager" | "department_head" | "hr";
+export type ApprovalStepStatus = "pending" | "approved" | "rejected" | "skipped";
 
 export type Employee = {
   id: string;
@@ -36,7 +45,40 @@ export type LeaveRequest = {
   manager_comment: string | null;
   decided_by: string | null;
   decided_at: string | null;
+  /** Phase 3.5: the level whose signature is outstanding, 1-based. */
+  current_approval_level: number | null;
+  /** Why a request is parked as `approval_blocked`, in the employee's words. */
+  blocked_reason: string | null;
   created_at: string;
+};
+
+/** One signature in a request's frozen approval chain. */
+export type ApprovalStep = {
+  id: string;
+  level: number;
+  approver_employee_id: string;
+  approver_name: string;
+  approver_role: ApprovalStepRole;
+  status: ApprovalStepStatus;
+  comment: string | null;
+  decided_at: string | null;
+  created_at: string;
+  /** True for the level the request is actually waiting on. */
+  is_current: boolean;
+};
+
+/** GET /api/leave-requests/:id/approval-chain */
+export type ApprovalChain = {
+  request_id: string;
+  status: LeaveStatus;
+  blocked_reason: string | null;
+  current_approval_level: number | null;
+  /** 1, 2 or 3, from the working-day count. */
+  required_levels: number;
+  days: number;
+  steps: ApprovalStep[];
+  /** Derived by the database, never by the client. */
+  viewer_can_decide: boolean;
 };
 
 export type LeaveBalance = {
@@ -67,6 +109,12 @@ export type LeaveValidation = {
   error_message: string | null;
   conflicts: LeaveConflict[];
   id?: string;
+  /** Phase 3.5: true when the request exists but no chain could be built. */
+  approval_blocked?: boolean;
+  /** Set only when `approval_blocked`, explaining what is missing. */
+  approval_blocked_reason?: string | null;
+  /** The first level actually awaiting a signature. */
+  current_approval_level?: number | null;
 };
 
 /** Shape returned by approve_leave_request / reject_leave_request. */
@@ -76,7 +124,34 @@ export type LeaveDecision = {
   error_message: string | null;
   details?: Record<string, unknown>;
   request?: LeaveRequest & { available_balance?: number | null };
+  /**
+   * Phase 3.5: false when this signature only advanced the chain, so the
+   * balance has NOT been spent yet. True on the final approval.
+   */
+  final_approval?: boolean;
+  /** The level the request moved to, when it is still in progress. */
+  awaiting_level?: number | null;
 };
+
+/** A raw row of `leave_approval_steps`, as the server reads it. */
+export type LeaveApprovalStep = {
+  id: string;
+  leave_request_id: string;
+  level: number;
+  approver_employee_id: string;
+  approver_role: ApprovalStepRole;
+  status: ApprovalStepStatus;
+  comment: string | null;
+  decided_at: string | null;
+  created_at: string;
+};
+
+/**
+ * A request as it appears on the requester's own list: the row plus the frozen
+ * chain, so the page can show both the current stage and the full history without
+ * a request per row.
+ */
+export type MyLeaveRequest = LeaveRequest & { approval_chain: ApprovalStep[] };
 
 /** A request joined with the directory fields the inbox needs to render a row. */
 export type ApprovalRequest = LeaveRequest & {
@@ -84,6 +159,12 @@ export type ApprovalRequest = LeaveRequest & {
   employee_photo: string | null;
   employee_role: string;
   employee_department: string;
+  /** Phase 3.5: the chain, so the inbox can render a timeline per row. */
+  approval_chain: ApprovalStep[];
+  /** The level waiting on the viewer, or null when it is not their turn. */
+  viewer_level: number | null;
+  /** True only for the request the viewer is the assigned approver of right now. */
+  viewer_can_decide: boolean;
 };
 
 /** Org chart node shape returned by get_org_tree. */
@@ -204,7 +285,109 @@ export type AlertType =
   | "leave_pending"
   | "balance_low"
   | "upcoming_leave"
-  | "team_absent";
+  | "team_absent"
+  // Phase 3.5 — a step waiting on somebody, and the handover to the next one.
+  | "approval_pending"
+  | "approval_escalated"
+  | "approval_overdue";
+
+// ---------------------------------------------------------------------------
+// Smart HR Query (Phase 8)
+//
+// Mirrors of the seven `q_*` functions. Rule 5: the model picks one of these by
+// name and fills in its arguments — it never produces a row shape, and the
+// `summary` below is written in code from the rows, never by the model.
+// ---------------------------------------------------------------------------
+
+/** One column header in the results table. `align: "right"` for figures. */
+export type HrQueryColumn = {
+  key: string;
+  label: string;
+  align?: "left" | "right";
+};
+
+/** A result cell. Dates and names arrive as text; figures may be numeric. */
+export type HrQueryRow = Record<string, string | number | boolean | null>;
+
+/** The whole response body for POST /api/ai/hr-query. */
+export type HrQueryResult = {
+  type: "hr_query_result";
+  /** Written by the server from `rows` alone. */
+  summary: string;
+  columns: HrQueryColumn[];
+  rows: HrQueryRow[];
+  /** The function that produced this, for the "show query details" toggle. */
+  tool_used: string;
+  /** The validated arguments, after the server recomputed the range. */
+  params: Record<string, unknown>;
+};
+
+/** Sent when the question maps to no function in the catalog. */
+export type HrQueryUnsupported = {
+  type: "hr_query_unsupported";
+  message: string;
+  /** Offered back so the user is never left without a next step. */
+  examples: string[];
+};
+
+export type OnLeaveBetweenRow = {
+  employee: string;
+  employee_id: string;
+  department: string;
+  leave_type: LeaveType;
+  start_date: string;
+  end_date: string;
+  days: number;
+};
+
+export type CountOnLeaveRow = {
+  on_leave_date: string;
+  department: string;
+  headcount: number;
+  names: string[];
+};
+
+export type LeaveUsageRow = {
+  department: string;
+  headcount: number;
+  people_away: number;
+  requests: number;
+  leave_days: number;
+  days_per_person: number;
+};
+
+export type LowBalanceRow = {
+  employee: string;
+  employee_id: string;
+  department: string;
+  leave_type: LeaveType;
+  allocated: number;
+  used: number;
+  remaining: number;
+};
+
+export type PendingApprovalsRow = {
+  department: string;
+  pending_count: number;
+  oldest_days: number;
+  names: string[];
+};
+
+export type DepartmentAvailabilityRow = {
+  department: string;
+  headcount: number;
+  avg_availability_pct: number;
+  lowest_availability_pct: number;
+  lowest_date: string | null;
+};
+
+export type TopLeaveTakersRow = {
+  employee: string;
+  employee_id: string;
+  department: string;
+  requests: number;
+  leave_days: number;
+};
 
 export type Alert = {
   id: string;
@@ -213,8 +396,26 @@ export type Alert = {
   severity: string;
   message: string;
   related_date: string | null;
+  /** Phase 3.5: the stable identity of this alert, so it is created once. */
+  dedupe_key: string | null;
+  related_request_id: string | null;
   created_at: string;
   is_read: boolean;
+};
+
+/**
+ * One row per HR Copilot tool invocation. Written by the server through the
+ * service-role client; a browser session may only read its own trail.
+ */
+export type AiAuditLog = {
+  id: string;
+  employee_id: string;
+  tool_name: string;
+  arguments: Record<string, unknown>;
+  success: boolean;
+  error: string | null;
+  duration_ms: number | null;
+  created_at: string;
 };
 
 /** One day of the availability grid. Weekends are returned but flagged. */
@@ -306,7 +507,9 @@ export type Database = {
       employees: Table<Employee>;
       leave_requests: Table<LeaveRequest>;
       leave_balances: Table<LeaveBalance>;
+      leave_approval_steps: Table<LeaveApprovalStep>;
       alerts: Table<Alert>;
+      ai_audit_log: Table<AiAuditLog>;
     };
     Views: Record<string, never>;
     Functions: {
@@ -366,6 +569,42 @@ export type Database = {
         Args: Record<string, never>;
         Returns: number;
       };
+      /** Phase 3.5: service-role only — nudges approvers of stale steps. */
+      generate_approval_alerts: {
+        Args: { p_threshold_days?: number };
+        Returns: number;
+      };
+      // -- Smart HR Query (Phase 8) ---------------------------------------
+      // All seven are SECURITY DEFINER and assert the HR role inside the
+      // database, so calling them with a non-HR session raises 42501.
+      q_on_leave_between: {
+        Args: { p_from: string; p_to: string; p_department?: string | null };
+        Returns: OnLeaveBetweenRow[];
+      };
+      q_count_on_leave: {
+        Args: { p_date: string; p_department?: string | null };
+        Returns: CountOnLeaveRow[];
+      };
+      q_leave_usage_by_department: {
+        Args: { p_from: string; p_to: string };
+        Returns: LeaveUsageRow[];
+      };
+      q_employees_low_balance: {
+        Args: { p_threshold: number; p_leave_type?: LeaveType | null };
+        Returns: LowBalanceRow[];
+      };
+      q_pending_approvals_count: {
+        Args: { p_department?: string | null };
+        Returns: PendingApprovalsRow[];
+      };
+      q_department_availability: {
+        Args: { p_from: string; p_to: string };
+        Returns: DepartmentAvailabilityRow[];
+      };
+      q_top_leave_takers: {
+        Args: { p_from: string; p_to: string; p_limit?: number | null };
+        Returns: TopLeaveTakersRow[];
+      };
       org_tree_health: {
         Args: Record<string, never>;
         Returns: {
@@ -380,6 +619,16 @@ export type Database = {
       is_manager_of: { Args: { p_employee_id: string }; Returns: boolean };
       is_hr: { Args: Record<string, never>; Returns: boolean };
       can_manage: { Args: { p_employee_id: string }; Returns: boolean };
+      // -- Hierarchical approval (Phase 3.5) ---------------------------------
+      can_decide_leave_step: {
+        Args: { p_request_id: string; p_level?: number | null };
+        Returns: boolean;
+      };
+      required_approval_levels: { Args: { p_days: number }; Returns: number };
+      get_approval_chain: {
+        Args: { p_request_id: string };
+        Returns: { ok: boolean; chain: ApprovalChain } | { ok: false; error_code: string; error_message: string };
+      };
       current_employee: { Args: Record<string, never>; Returns: Employee };
       get_employee_detail: {
         Args: { p_employee_id: string };
@@ -390,6 +639,8 @@ export type Database = {
       leave_type: LeaveType;
       leave_status: LeaveStatus;
       app_role: AppRole;
+      approval_step_status: ApprovalStepStatus;
+      approval_step_role: ApprovalStepRole;
     };
     CompositeTypes: Record<string, never>;
   };

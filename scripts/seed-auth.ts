@@ -1,11 +1,17 @@
 /**
- * Creates the three demo auth users and links them to their `employees` rows.
+ * Creates a demo auth user for every active employee and links it to their
+ * `employees` row.
  *
  *   npm run seed:auth
  *
  * Safe to re-run: existing users are located by email and their password is
  * reset to the demo value, and the employees.auth_user_id link is re-applied.
  * Requires SUPABASE_SERVICE_ROLE_KEY (server-side only — never in the browser).
+ *
+ * The list is derived from the employees table rather than hard-coded, because
+ * hierarchical approval hands signatures to people further up the reporting line
+ * (a department head is frequently NOT the direct manager) and every one of them
+ * has to be able to sign in to act on their step.
  */
 import { config } from "dotenv";
 import { createAdminClient } from "../server/supabase/admin-core";
@@ -16,15 +22,24 @@ config();
 
 const DEMO_PASSWORD = "OrgFlow@2026";
 
-const DEMO_USERS = [
-  { email: "neha.gupta@orgflow.dev", role: "employee" as const },
-  { email: "sanjay.kapoor@orgflow.dev", role: "manager" as const },
-  { email: "vikram.sethi@orgflow.dev", role: "manager" as const },
-  { email: "rohan.iyer@orgflow.dev", role: "hr" as const },
-];
+type DemoUser = { email: string; role: "employee" | "manager" | "hr" };
 
 async function main() {
   const supabase = createAdminClient();
+
+  const { data: staff, error: staffError } = await supabase
+    .from("employees")
+    .select("email, app_role")
+    .eq("is_active", true)
+    .order("app_role");
+
+  if (staffError) throw staffError;
+
+  const DEMO_USERS: DemoUser[] = (staff ?? []).map((e) => ({
+    email: e.email,
+    role: e.app_role as DemoUser["role"],
+  }));
+
   const credentials: { email: string; role: string; password: string }[] = [];
 
   for (const demo of DEMO_USERS) {

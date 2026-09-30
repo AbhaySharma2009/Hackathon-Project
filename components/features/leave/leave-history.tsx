@@ -1,7 +1,6 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -11,14 +10,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { LEAVE_TYPE_LABEL } from "@/server/leave";
-import type { LeaveRequest, LeaveStatus } from "@/shared/types";
-
-const STATUS_VARIANT: Record<LeaveStatus, "default" | "secondary" | "destructive" | "outline"> = {
-  pending: "secondary",
-  approved: "default",
-  rejected: "destructive",
-  cancelled: "outline",
-};
+import { ApprovalStageLine } from "@/components/features/approvals/approval-timeline";
+import { StatusBadge } from "@/components/design/status-badge";
+import type { MyLeaveRequest } from "@/shared/types";
 
 function formatRange(start: string, end: string) {
   const format = (value: string) =>
@@ -30,14 +24,14 @@ export function LeaveHistory({
   requests,
   onSelect,
 }: {
-  requests: LeaveRequest[];
+  requests: MyLeaveRequest[];
   onSelect: (id: string) => void;
 }) {
   return (
     <>
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Request history</CardTitle>
+          <CardTitle>Request history</CardTitle>
         </CardHeader>
         <CardContent className="px-0">
           <Table>
@@ -47,6 +41,9 @@ export function LeaveHistory({
                 <TableHead>Dates</TableHead>
                 <TableHead className="text-right">Days</TableHead>
                 <TableHead>Status</TableHead>
+                {/* Phase 3.5: where the request has got to, in the form the phase
+                    asks for — `Manager ✓ → Department Head ● → HR ○`. */}
+                <TableHead>Approval progress</TableHead>
                 <TableHead>Note</TableHead>
               </TableRow>
             </TableHeader>
@@ -65,9 +62,21 @@ export function LeaveHistory({
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{request.days}</TableCell>
                   <TableCell>
-                    <Badge variant={STATUS_VARIANT[request.status]}>{request.status}</Badge>
+                    <StatusBadge status={request.status} />
+                    {request.status === "approval_blocked" && request.blocked_reason ? (
+                      <p className="mt-1 max-w-48 text-xs text-muted-foreground">
+                        {request.blocked_reason}
+                      </p>
+                    ) : null}
                   </TableCell>
-                  <TableCell className="max-w-56 truncate text-xs text-muted-foreground">
+                  <TableCell>
+                    {request.approval_chain.length > 0 ? (
+                      <ApprovalStageLine steps={request.approval_chain} />
+                    ) : (
+                      <span className="text-sm text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="max-w-56 truncate text-sm text-muted-foreground">
                     {request.manager_comment ?? "—"}
                   </TableCell>
                 </TableRow>

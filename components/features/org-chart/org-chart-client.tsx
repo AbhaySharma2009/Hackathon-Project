@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Search, Building2, AlertTriangle, ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Search, Building2, AlertTriangle, Users, ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
 import Tree, { type CustomNodeElementProps, type RawNodeDatum } from "react-d3-tree";
 import { apiFetch } from "@/shared/api-client";
 import { createClient } from "@/shared/supabase-client";
@@ -10,6 +10,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmployeeDetailDrawer } from "@/components/features/directory/employee-detail-drawer";
+import { PageHeader } from "@/components/design/page-header";
+import { EmptyState, ErrorState } from "@/components/design/states";
+import { LoadingRegion } from "@/components/design/loaders";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -99,6 +103,9 @@ export function OrgChartClient() {
   const [department, setDepartment] = useState("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [viewport, setViewport] = useState({ zoom: 0.8, x: 400, y: 80 });
+  // Mirrors `viewport` so the zoom handler can compare against the last value it
+  // committed without re-creating the callback on every render.
+  const viewportRef = useRef(viewport);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const response = await apiFetch<{
@@ -117,7 +124,13 @@ export function OrgChartClient() {
       .catch((err: Error) => {
         if (err.name !== "AbortError") setError(err.message);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        // An aborted request has no data to show, so it must not clear `loading`
+        // either. React's StrictMode runs this effect twice and aborts the first
+        // run; clearing the flag anyway handed `<Tree>` an empty forest, and the
+        // empty-state node is what crashed `renderNode`.
+        if (!controller.signal.aborted) setLoading(false);
+      });
     return () => controller.abort();
   }, [load]);
 
@@ -164,15 +177,59 @@ export function OrgChartClient() {
   // The seed has a single root, so render it directly. A second root would be
   // drawn on top of the first, so multiple roots are wrapped in a synthetic parent.
   const treeData: RawNodeDatum = useMemo(() => {
-    if (chartData.length === 0) return { name: "No matching employees" };
+    // Every node handed to react-d3-tree goes through `renderNode`, which reads
+    // `attributes` unconditionally — including the empty state and the synthetic
+    // root. A bare `{ name }` is therefore not a valid datum here, and it used to
+    // white-screen the page whenever the chart had nothing to draw.
+    const stub = (name: string): ChartNode => ({
+      name,
+      attributes: { id: "root", photo: "", role: "", department: "", reports: 0 },
+    });
+
+    if (chartData.length === 0) {
+      return stub(search.trim() ? "No matching employees" : "No employees to show");
+    }
     if (chartData.length === 1) return chartData[0];
-    return { name: "OrgFlow", attributes: { id: "root" }, children: chartData };
-  }, [chartData]);
+    return { ...stub("OrgFlow"), children: chartData };
+  }, [chartData, search]);
+
+  /**
+   * Applies a zoom or pan.
+   *
+   * `onUpdate` is not purely user-driven: react-d3-tree also fires it when the
+   * `translate` / `zoom` props change. Writing a fresh object unconditionally
+   * therefore made a closed loop — setState re-renders, the new props fire
+   * `onUpdate` again, and React gives up at its nested-update ceiling. Committing
+   * only on a real change breaks the cycle while leaving dragging and zooming
+   * exactly as responsive. The epsilon keeps sub-pixel d3 rounding from being
+   * read as movement.
+   */
+  const updateViewport = useCallback((zoom: number, x: number, y: number) => {
+    const previous = viewportRef.current;
+    if (
+      Math.abs(zoom - previous.zoom) < 1e-4 &&
+      Math.abs(x - previous.x) < 0.05 &&
+      Math.abs(y - previous.y) < 0.05
+    ) {
+      return;
+    }
+    const next = { zoom, x, y };
+    viewportRef.current = next;
+    setViewport(next);
+  }, []);
 
   const renderNode = useCallback(
     ({ nodeDatum, toggleNode }: CustomNodeElementProps) => {
-      const { id, photo, role, department: dept, reports } = nodeDatum
-        .attributes as ChartNode["attributes"] & Record<string, string | number | boolean>;
+      // Destructuring a missing `attributes` took down the whole page, so the
+      // render path is total: a node the chart cannot describe still draws
+      // rather than unmounting the tree.
+      const { id, photo, role, department: dept, reports } = (nodeDatum.attributes ?? {
+        id: "",
+        photo: "",
+        role: "",
+        department: "",
+        reports: 0,
+      }) as ChartNode["attributes"] & Record<string, string | number | boolean>;
       const style = DEPARTMENT_STYLES[dept] ?? FALLBACK_STYLE;
       const isSelected = selectedId === id;
       // The department control highlights rather than hides, so the reporting
@@ -181,7 +238,16 @@ export function OrgChartClient() {
 
       return (
         <g
-          className="cursor-pointer"
+          className="of-org-node cursor-pointer"
+          tabIndex={0}
+          role="button"
+          aria-label={`${nodeDatum.name}, ${role}, ${dept}${reports > 0 ? `, ${reports} direct report${reports === 1 ? "" : "s"}` : ""}`}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setSelectedId(id);
+            }
+          }}
           opacity={inDepartment ? 1 : 0.25}
           onClick={(event) => {
             event.stopPropagation();
@@ -192,38 +258,51 @@ export function OrgChartClient() {
               SVG and does not accept children, so a shared <defs> is not possible. */}
           <defs>
             <clipPath id={`avatar-${id}`}>
-              <circle cx={0} cy={-32} r={20} />
+              <circle cx={0} cy={-34} r={22} />
             </clipPath>
           </defs>
 
           <rect
-            x={-90}
-            y={-58}
-            rx={12}
-            width={180}
-            height={116}
+            x={-92}
+            y={-60}
+            rx={14}
+            width={184}
+            height={122}
             fill="var(--color-card)"
             stroke={isSelected ? "var(--color-primary)" : "var(--color-border)"}
             strokeWidth={isSelected ? 2.5 : 1}
           />
+          {/* A soft lift behind the card, so a selected node reads as raised
+              rather than merely outlined. */}
+          {isSelected ? (
+            <rect
+              x={-92}
+              y={-60}
+              rx={14}
+              width={184}
+              height={122}
+              fill="var(--color-primary)"
+              opacity={0.08}
+            />
+          ) : null}
           {photo ? (
             <image
               href={photo}
-              x={-20}
-              y={-52}
-              width={40}
-              height={40}
+              x={-22}
+              y={-56}
+              width={44}
+              height={44}
               clipPath={`url(#avatar-${id})`}
               preserveAspectRatio="xMidYMid slice"
             />
           ) : (
             <>
-              <circle cx={0} cy={-32} r={20} fill="var(--color-muted)" />
+              <circle cx={0} cy={-34} r={22} fill="var(--color-muted)" />
               <text
                 x={0}
-                y={-26}
+                y={-28}
                 textAnchor="middle"
-                fontSize={14}
+                fontSize={15}
                 fontWeight={600}
                 fill="var(--color-muted-foreground)"
               >
@@ -233,9 +312,9 @@ export function OrgChartClient() {
           )}
           <text
             x={0}
-            y={0}
+            y={2}
             textAnchor="middle"
-            fontSize={13}
+            fontSize={14}
             fontWeight={600}
             fill="var(--color-foreground)"
           >
@@ -243,23 +322,24 @@ export function OrgChartClient() {
           </text>
           <text
             x={0}
-            y={16}
+            y={19}
             textAnchor="middle"
-            fontSize={10}
+            fontSize={11.5}
             fill="var(--color-muted-foreground)"
           >
-            {role.length > 24 ? `${role.slice(0, 23)}…` : role}
+            {role.length > 26 ? `${role.slice(0, 25)}…` : role}
           </text>
-          <circle cx={-52} cy={30} r={4} className={style.dot} />
-          <text x={-44} y={34} textAnchor="start" fontSize={10} fill="var(--color-muted-foreground)">
+          <circle cx={-54} cy={36} r={4} className={style.dot} />
+          <text x={-46} y={40} textAnchor="start" fontSize={11.5} fill="var(--color-muted-foreground)">
             {dept}
           </text>
           {reports > 0 ? (
             <text
-              x={52}
-              y={34}
+              x={54}
+              y={40}
               textAnchor="end"
-              fontSize={10}
+              fontSize={11.5}
+              fontWeight={600}
               fill="var(--color-muted-foreground)"
             >
               {reports} report{reports === 1 ? "" : "s"}
@@ -275,10 +355,10 @@ export function OrgChartClient() {
                 toggleNode();
               }}
             >
-              <circle cx={72} cy={-58} r={11} fill="var(--color-muted)" />
+              <circle cx={74} cy={-60} r={11} fill="var(--color-muted)" />
               <text
-                x={72}
-                y={-54}
+                x={74}
+                y={-56}
                 textAnchor="middle"
                 fontSize={13}
                 fontWeight={700}
@@ -300,15 +380,10 @@ export function OrgChartClient() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Org Chart</h1>
-          <p className="text-sm text-muted-foreground">
-            The reporting hierarchy built from <code>employees.manager_id</code>. Drag to pan, scroll to
-            zoom, click a card to collapse or expand.
-          </p>
-        </div>
-
+      <PageHeader
+        title="Org Chart"
+        description="The reporting hierarchy built from employees.manager_id. Drag to pan, scroll to zoom, click a card to open the employee's record, or use the +/− control to collapse their branch."
+        actions={
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative w-56">
             <Search
@@ -345,9 +420,13 @@ export function OrgChartClient() {
           <Button
             variant="outline"
             size="icon"
-            onClick={() =>
-              setViewport((v) => ({ ...v, zoom: Math.min(1.6, v.zoom + 0.15) }))
-            }
+            // Routed through the same guard as the drag handler so the ref stays
+            // in step with the state; a direct setViewport here would leave the
+            // ref stale and the next `onUpdate` would look like a real change.
+            onClick={() => {
+              const v = viewportRef.current;
+              updateViewport(Math.min(1.6, v.zoom + 0.15), v.x, v.y);
+            }}
             aria-label="Zoom in"
           >
             <ZoomIn className="size-4" aria-hidden />
@@ -355,9 +434,10 @@ export function OrgChartClient() {
           <Button
             variant="outline"
             size="icon"
-            onClick={() =>
-              setViewport((v) => ({ ...v, zoom: Math.max(0.3, v.zoom - 0.15) }))
-            }
+            onClick={() => {
+              const v = viewportRef.current;
+              updateViewport(Math.max(0.3, v.zoom - 0.15), v.x, v.y);
+            }}
             aria-label="Zoom out"
           >
             <ZoomOut className="size-4" aria-hidden />
@@ -365,15 +445,29 @@ export function OrgChartClient() {
           <Button
             variant="outline"
             size="icon"
-            onClick={() => setViewport({ zoom: 0.8, x: 400, y: 80 })}
+            onClick={() => updateViewport(0.8, 400, 80)}
             aria-label="Reset the view"
           >
             <Maximize2 className="size-4" aria-hidden />
           </Button>
         </div>
-      </div>
+        }
+      />
 
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {error ? (
+        <ErrorState
+          title="We couldn't load the org chart"
+          message={error}
+          retrying={loading}
+          onRetry={() => {
+            setLoading(true);
+            setError(null);
+            void load()
+              .catch((err: Error) => setError(err.message))
+              .finally(() => setLoading(false));
+          }}
+        />
+      ) : null}
 
       {missing > 0 ? (
         <div
@@ -386,11 +480,36 @@ export function OrgChartClient() {
         </div>
       ) : null}
 
+      {!error ? (
       <Card className="overflow-hidden">
         <CardContent className="p-0">
           {loading ? (
-            <div className="flex h-[640px] items-center justify-center">
-              <p className="text-sm text-muted-foreground">Loading the org chart…</p>
+            <div className="flex h-[640px] flex-col items-center justify-center gap-4" aria-hidden>
+              <LoadingRegion label="Loading the org chart" />
+              <div className="flex flex-col items-center gap-3">
+                <Skeleton className="size-11 rounded-full" />
+                <Skeleton className="h-3 w-40" />
+                <Skeleton className="h-3 w-24" />
+              </div>
+              <div className="mt-6 grid grid-cols-3 gap-8 opacity-60">
+                {[0, 1, 2].map((column) => (
+                  <div key={column} className="flex flex-col items-center gap-8">
+                    <Skeleton className="h-24 w-44 rounded-xl" />
+                    <Skeleton className="h-20 w-40 rounded-xl" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : forest.length === 0 ? (
+            // The error, or the empty org, is already explained above. Mounting
+            // the chart here would only draw a placeholder card.
+            <div className="flex h-[640px] items-center justify-center px-6">
+              <EmptyState
+                className="border-0"
+                icon={Users}
+                title="There is nobody to chart yet"
+                description="Once employees are added with a manager, the hierarchy appears here automatically."
+              />
             </div>
           ) : (
             <div className="h-[640px] w-full">
@@ -399,7 +518,9 @@ export function OrgChartClient() {
                 orientation="vertical"
                 translate={{ x: viewport.x, y: viewport.y }}
                 zoom={viewport.zoom}
-                onUpdate={({ zoom, translate }) => setViewport({ zoom, x: translate.x, y: translate.y })}
+                onUpdate={({ zoom, translate }) =>
+                  updateViewport(zoom, translate.x, translate.y)
+                }
                 renderCustomNodeElement={renderNode}
                 hasInteractiveNodes
                 zoomable
@@ -415,9 +536,10 @@ export function OrgChartClient() {
           )}
         </CardContent>
       </Card>
+      ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex flex-wrap items-center gap-4 text-sm">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
           <span className="font-medium">Departments</span>
           {departments.map((name) => {
             const style = DEPARTMENT_STYLES[name] ?? FALLBACK_STYLE;
@@ -440,7 +562,7 @@ export function OrgChartClient() {
       {/* Clicking a card opens the same record the Directory shows, so the chart
           and the directory can never disagree about an employee. */}
       <EmployeeDetailDrawer
-        key={selectedId ?? "closed"}
+        key={`drawer-${selectedId ?? "closed"}`}
         employeeId={selectedId}
         onOpenChange={(open) => {
           if (!open) setSelectedId(null);

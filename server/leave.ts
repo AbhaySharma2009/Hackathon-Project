@@ -7,7 +7,15 @@ import type { LeaveType } from "@/shared/types";
  * stay free of `server-only` and `next/server` imports.
  */
 export const LEAVE_TYPES = ["casual", "sick", "annual", "unpaid"] as const;
-export const LEAVE_STATUSES = ["pending", "approved", "rejected", "cancelled"] as const;
+// `approval_blocked` is a real status an employee can see on their own list, so it
+// has to survive the `?status=` filter rather than failing validation.
+export const LEAVE_STATUSES = [
+  "pending",
+  "approved",
+  "rejected",
+  "cancelled",
+  "approval_blocked",
+] as const;
 
 /** ISO calendar date, `YYYY-MM-DD`. The database parses it into a `date`. */
 const isoDate = z

@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { CalendarPlus, Inbox } from "lucide-react";
+import { CalendarPlus } from "lucide-react";
 import { apiFetch } from "@/shared/api-client";
 import { createClient } from "@/shared/supabase-client";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { PageHeader } from "@/components/design/page-header";
+import { EmptyState, ErrorState } from "@/components/design/states";
+import { KpiSkeleton, ListSkeleton } from "@/components/design/loaders";
 import { BalanceCards } from "@/components/features/leave/balance-cards";
 import { LeaveHistory } from "@/components/features/leave/leave-history";
 import { LeaveRequestDrawer } from "@/components/features/leave/leave-request-drawer";
@@ -13,11 +15,11 @@ import {
   RequestLeaveDialog,
   type BalanceRow,
 } from "@/components/features/leave/request-leave-dialog";
-import type { LeaveRequest } from "@/shared/types";
+import type { MyLeaveRequest } from "@/shared/types";
 
 export function MyLeavesClient({ employeeId }: { employeeId: string }) {
   const [balances, setBalances] = useState<BalanceRow[]>([]);
-  const [requests, setRequests] = useState<LeaveRequest[]>([]);
+  const [requests, setRequests] = useState<MyLeaveRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -32,7 +34,7 @@ export function MyLeavesClient({ employeeId }: { employeeId: string }) {
         `/api/leave-balances/${employeeId}?year=${new Date().getFullYear()}`,
         { signal: controller.signal },
       ),
-      apiFetch<{ data: LeaveRequest[] }>("/api/leave-requests", {
+      apiFetch<{ data: MyLeaveRequest[] }>("/api/leave-requests", {
         signal: controller.signal,
       }),
     ])
@@ -88,54 +90,58 @@ export function MyLeavesClient({ employeeId }: { employeeId: string }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">My Leaves</h1>
-          <p className="text-sm text-muted-foreground">
-            Your balances and every request you have made.
-          </p>
-        </div>
-        <Button onClick={() => setDialogOpen(true)}>
-          <CalendarPlus className="size-4" aria-hidden />
-          Request leave
-        </Button>
-      </div>
+      <PageHeader
+        title="My Leaves"
+        description="Your balances for the year, and every request you have made with the level it reached."
+        actions={
+          <Button size="lg" onClick={() => setDialogOpen(true)}>
+            <CalendarPlus aria-hidden />
+            Request leave
+          </Button>
+        }
+      />
 
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-
-      {loading ? (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-32 animate-pulse rounded-lg bg-muted" aria-hidden />
-          ))}
-        </div>
+      {error ? (
+        <ErrorState
+          title="We couldn't load your leave"
+          message={error}
+          onRetry={() => {
+            setLoading(true);
+            setError(null);
+            setNonce((n) => n + 1);
+          }}
+        />
       ) : (
-        <BalanceCards balances={balances} />
+        <>
+          {loading ? <KpiSkeleton /> : <BalanceCards balances={balances} />}
+
+          {loading ? (
+            <ListSkeleton count={2} />
+          ) : requests.length === 0 ? (
+            <EmptyState
+              icon={CalendarPlus}
+              title="No leave requests yet"
+              description="When you request time off it will appear here, with its status and how far through the approval chain it has got."
+              action={
+                <Button onClick={() => setDialogOpen(true)}>
+                  <CalendarPlus aria-hidden />
+                  Request leave
+                </Button>
+              }
+            />
+          ) : (
+            <LeaveHistory requests={requests} onSelect={setSelectedId} />
+          )}
+        </>
       )}
 
-      {loading ? (
-        <div className="h-64 animate-pulse rounded-lg bg-muted" aria-hidden />
-      ) : requests.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-            <Inbox className="size-8 text-muted-foreground" aria-hidden />
-            <div>
-              <p className="font-medium">No leave requests yet</p>
-              <p className="text-sm text-muted-foreground">
-                When you request time off it will appear here with its status.
-              </p>
-            </div>
-            <Button variant="outline" onClick={() => setDialogOpen(true)}>
-              Request leave
-            </Button>
-          </CardContent>
-        </Card>
-      ) : (
-        <LeaveHistory requests={requests} onSelect={setSelectedId} />
-      )}
-
+      {/* These two are siblings, so their keys share one namespace. A bare
+          "closed" on both collided whenever the dialog was shut and nothing was
+          selected, which React reports as duplicate children. The key is still
+          doing its real job — remounting on identity change so the component's
+          internal state resets without an effect. */}
       <RequestLeaveDialog
-        key={dialogOpen ? "open" : "closed"}
+        key={`request-${dialogOpen ? "open" : "closed"}`}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         balances={balances}
@@ -143,7 +149,7 @@ export function MyLeavesClient({ employeeId }: { employeeId: string }) {
       />
 
       <LeaveRequestDrawer
-        key={selectedId ?? "closed"}
+        key={`drawer-${selectedId ?? "closed"}`}
         request={requests.find((r) => r.id === selectedId) ?? null}
         onOpenChange={(open) => {
           if (!open) setSelectedId(null);

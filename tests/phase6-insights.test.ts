@@ -655,10 +655,12 @@ describe("alerts", () => {
 
     const { body } = await api(hrCookie, "/api/alerts");
     const feed = body.data as AlertsFeed;
-    const target = feed.alerts[0];
+    // The first UNREAD alert, not merely the first one: this file's assertions
+    // are about the read/unread transition, so the subject has to start unread.
+    // Picking by position instead made the test depend on whatever the newest
+    // alert happened to be and on read state left by earlier runs.
+    const target = feed.alerts.find((a) => !a.is_read);
     if (!target) return; // nothing raised in this environment; nothing to assert
-
-    expect(target.is_read).toBe(false);
 
     const marked = await api(hrCookie, `/api/alerts/${target.id}`, {
       method: "PATCH",

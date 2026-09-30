@@ -12,16 +12,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
+  Building2,
   CalendarClock,
+  History,
   Sparkles,
   TrendingDown,
   UserCheck,
   Users,
+  Wallet,
 } from "lucide-react";
 import { apiFetch } from "@/shared/api-client";
 import { createClient } from "@/shared/supabase-client";
 import { LEAVE_TYPE_LABEL } from "@/server/leave";
-import type { DashboardSummary, LeaveActivity } from "@/shared/types";
+import type { AppRole, DashboardSummary, LeaveActivity } from "@/shared/types";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,7 +37,12 @@ import {
   LeaveBalanceChart,
   LeaveUsageByDepartmentChart,
 } from "@/components/features/dashboard/charts";
-import { AlertsCard } from "@/components/features/dashboard/alerts-card";
+import { SmartHrQueryCard } from "@/components/features/dashboard/smart-hr-query-card";
+import { PageHeader } from "@/components/design/page-header";
+import { KpiCard } from "@/components/design/kpi-card";
+import { EmptyState, ErrorState } from "@/components/design/states";
+import { ChartSkeleton, KpiSkeleton, ListSkeleton, TableSkeleton } from "@/components/design/loaders";
+import { AlertList } from "@/components/features/alerts/alert-list";
 
 function initials(name: string) {
   return name
@@ -77,7 +85,7 @@ const EVENT_BADGE: Record<LeaveActivity["event"], "secondary" | "outline" | "des
   rejected: "destructive",
 };
 
-export function HrDashboardClient() {
+export function HrDashboardClient({ appRole }: { appRole: AppRole }) {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -140,13 +148,24 @@ export function HrDashboardClient() {
     [summary],
   );
 
-  if (loading) return <DashboardSkeleton />;
+  if (loading) return <HrDashboardSkeleton />;
 
   if (error || !summary) {
     return (
       <div className="space-y-6">
-        <h1 className="text-2xl font-semibold tracking-tight">HR Dashboard</h1>
-        <p className="text-sm text-destructive">{error ?? "Could not load the dashboard."}</p>
+        <PageHeader title="HR Dashboard" />
+        <ErrorState
+          title="We couldn't load the dashboard"
+          message={error ?? "The workforce summary could not be read."}
+          retrying={loading}
+          onRetry={() => {
+            setLoading(true);
+            setError(null);
+            void load()
+              .catch((err: Error) => setError(err.message))
+              .finally(() => setLoading(false));
+          }}
+        />
       </div>
     );
   }
@@ -155,34 +174,33 @@ export function HrDashboardClient() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">HR Dashboard</h1>
-          <p className="text-sm text-muted-foreground">
-            {scope.org_wide
-              ? "Workforce insights across the organisation."
-              : "Your team's leave and workforce snapshot."}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Badge variant={scope.org_wide ? "default" : "secondary"}>
-            {scope.org_wide ? "Organisation-wide" : "Team only"}
-          </Badge>
-          {loadedAt ? (
-            <span>
-              Updated{" "}
-              {new Date(loadedAt).toLocaleTimeString("en-IN", {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </span>
-          ) : null}
-        </div>
-      </div>
+      <PageHeader
+        title="HR Dashboard"
+        description={
+          scope.org_wide
+            ? "Workforce insights across the organisation."
+            : "Your team's leave and workforce snapshot."
+        }
+        actions={
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Badge variant={scope.org_wide ? "default" : "secondary"}>
+              {scope.org_wide ? "Organisation-wide" : "Team only"}
+            </Badge>
+            {loadedAt ? (
+              <span>
+                Updated{" "}
+                {new Date(loadedAt).toLocaleTimeString("en-IN", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </span>
+            ) : null}
+          </div>
+        }
+      />
 
       {!scope.org_wide ? (
-        <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+        <p className="rounded-lg border bg-muted/50 px-3.5 py-2.5 text-sm text-muted-foreground">
           You are seeing your own team only. Organisation-wide figures are restricted to HR.
         </p>
       ) : null}
@@ -190,19 +208,24 @@ export function HrDashboardClient() {
       {/* ---- KPI cards ---- */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
-          icon={<Users className="size-4" aria-hidden />}
+          index={0}
+          icon={Users}
           label="Total headcount"
           value={kpis.headcount_total}
           hint="Active employees"
         />
         <KpiCard
-          icon={<UserCheck className="size-4" aria-hidden />}
+          index={1}
+          icon={UserCheck}
+          tone="warning"
           label="On leave today"
           value={kpis.on_leave_today}
           hint={`of ${kpis.headcount_total} people`}
         />
         <KpiCard
-          icon={<CalendarClock className="size-4" aria-hidden />}
+          index={2}
+          icon={CalendarClock}
+          tone={kpis.pending_approvals > 0 ? "info" : "neutral"}
           label="Pending approvals"
           value={kpis.pending_approvals}
           hint={
@@ -212,16 +235,22 @@ export function HrDashboardClient() {
           }
         />
         <KpiCard
-          icon={<TrendingDown className="size-4" aria-hidden />}
+          index={3}
+          icon={TrendingDown}
+          tone="primary"
           label="Avg remaining balance"
-          value={kpis.average_remaining_balance}
-          suffix="days"
+          value={
+            <>
+              {kpis.average_remaining_balance}
+              <span className="ml-1.5 text-base font-medium text-muted-foreground">days</span>
+            </>
+          }
           hint="Per person, this year"
         />
       </div>
 
       {/* ---- Alerts ---- */}
-      <AlertsCard />
+      <AlertList />
 
       {/* ---- Charts ---- */}
       <div className="grid gap-4 lg:grid-cols-2">
@@ -232,7 +261,7 @@ export function HrDashboardClient() {
           </CardHeader>
           <CardContent>
             {summary.headcount_by_department.length === 0 ? (
-              <EmptyState message="No active employees in scope." />
+              <EmptyState icon={Users} title="No active employees in scope" description="Once employees are added they will be counted here." />
             ) : (
               <HeadcountByDepartmentChart data={summary.headcount_by_department} />
             )}
@@ -246,7 +275,7 @@ export function HrDashboardClient() {
           </CardHeader>
           <CardContent>
             {summary.leave_balance_by_department.length === 0 ? (
-              <EmptyState message="No balances recorded yet." />
+              <EmptyState icon={Wallet} title="No balances recorded yet" description="Leave allocations for this year have not been set up." />
             ) : (
               <LeaveUsageByDepartmentChart data={summary.leave_balance_by_department} />
             )}
@@ -270,7 +299,7 @@ export function HrDashboardClient() {
           </CardHeader>
           <CardContent>
             {kpis.on_leave_today === 0 ? (
-              <EmptyState message="Everyone is in today." />
+              <EmptyState icon={UserCheck} title="Everyone is in today" description="Nobody in scope is on leave, so coverage is at full strength." />
             ) : (
               <AvailabilityDonut data={summary.department_workforce} />
             )}
@@ -287,7 +316,7 @@ export function HrDashboardClient() {
           </CardHeader>
           <CardContent>
             {summary.top_leave_takers.length === 0 ? (
-              <EmptyState message={`No approved leave in ${summary.quarter.label} yet.`} />
+              <EmptyState icon={CalendarClock} title={`No approved leave in ${summary.quarter.label}`} description="Approved days in this quarter will be listed here." />
             ) : (
               <ul className="space-y-3">
                 {summary.top_leave_takers.map((person) => (
@@ -326,7 +355,7 @@ export function HrDashboardClient() {
           </CardHeader>
           <CardContent>
             {summary.recent_activity.length === 0 ? (
-              <EmptyState message="No leave activity yet." />
+              <EmptyState icon={History} title="No leave activity yet" description="Decisions made on leave requests will appear here." />
             ) : (
               <ul className="space-y-3">
                 {summary.recent_activity.map((item) => (
@@ -353,7 +382,7 @@ export function HrDashboardClient() {
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-1">
                       <Badge variant={EVENT_BADGE[item.event]}>{item.event}</Badge>
-                      <span className="text-[11px] text-muted-foreground">
+                      <span className="text-xs text-muted-foreground">
                         {relativeTime(item.occurred_at)}
                       </span>
                     </div>
@@ -373,7 +402,7 @@ export function HrDashboardClient() {
         </CardHeader>
         <CardContent>
           {summary.department_workforce.length === 0 ? (
-            <EmptyState message="No departments in scope." />
+            <EmptyState icon={Building2} title="No departments in scope" description="The workforce breakdown appears once departments have active employees." />
           ) : (
             <Table>
               <TableHeader>
@@ -439,83 +468,57 @@ export function HrDashboardClient() {
           </CardContent>
         </Card>
 
-        <Card className="border-dashed">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Sparkles className="size-4 text-muted-foreground" aria-hidden />
-              Smart HR Query
-            </CardTitle>
-            <CardDescription>Ask the workforce data a question in plain English — Phase 8.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              The query box will only ever call the same role-scoped functions this
-              page already uses.
-            </p>
-          </CardContent>
-        </Card>
+        {appRole === "hr" ? (
+          <SmartHrQueryCard />
+        ) : (
+          <Card className="border-dashed">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Sparkles className="size-4 text-muted-foreground" aria-hidden />
+                Smart HR Query
+              </CardTitle>
+              <CardDescription>Ask the workforce data a question in plain English.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                This one is HR-only, because it reports across the whole organisation. Your own
+                figures are on the cards above.
+              </p>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );
 }
 
-function KpiCard({
-  icon,
-  label,
-  value,
-  hint,
-  suffix,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-  hint: string;
-  suffix?: string;
-}) {
-  return (
-    <Card>
-      <CardContent className="space-y-2">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span className="text-muted-foreground">{icon}</span>
-          {label}
-        </div>
-        <p className="text-3xl font-semibold tracking-tight tabular-nums">
-          {Number(value)}
-          {suffix ? (
-            <span className="ml-1 text-base font-normal text-muted-foreground">{suffix}</span>
-          ) : null}
-        </p>
-        <p className="text-xs text-muted-foreground">{hint}</p>
-      </CardContent>
-    </Card>
-  );
-}
-
-function EmptyState({ message }: { message: string }) {
-  return (
-    <div className="flex h-40 items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
-      {message}
-    </div>
-  );
-}
-
-function DashboardSkeleton() {
+/**
+ * The loading state mirrors the page it replaces: a KPI row, then chart-sized
+ * blocks, so nothing jumps when the figures arrive.
+ */
+function HrDashboardSkeleton() {
   return (
     <div className="space-y-6">
-      <div className="space-y-2">
-        <Skeleton className="h-8 w-56" />
-        <Skeleton className="h-4 w-72" />
+      {/* The heading is rendered during loading too, so the page always has
+          exactly one h1 rather than a title-less document while the summary is
+          still being read. */}
+      <PageHeader title="HR Dashboard" description="Reading the workforce summary…" />
+      <div className="space-y-2.5" aria-hidden>
+        <Skeleton className="h-9 w-56" />
+        <Skeleton className="h-4 w-80 max-w-full" />
       </div>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-28" />
-        ))}
-      </div>
+      <KpiSkeleton />
+      <ListSkeleton count={2} />
       <div className="grid gap-4 lg:grid-cols-2">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-72" />
+        {[0, 1].map((index) => (
+          <div key={index} className="rounded-xl border bg-card p-5">
+            <Skeleton className="h-5 w-48" />
+            <Skeleton className="mt-2 h-4 w-64 max-w-full" />
+            <ChartSkeleton className="mt-5 h-64 border-0 p-0" />
+          </div>
         ))}
       </div>
+      <TableSkeleton rows={5} columns={4} />
     </div>
   );
 }

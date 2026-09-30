@@ -1,14 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, SlidersHorizontal, X } from "lucide-react";
 import { apiFetch } from "@/shared/api-client";
 import { createClient } from "@/shared/supabase-client";
 import { LEAVE_TYPES, LEAVE_TYPE_LABEL } from "@/server/leave";
 import type { CalendarLeave, LeaveType } from "@/shared/types";
+import { cn } from "@/shared/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -16,16 +18,44 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { PageHeader } from "@/components/design/page-header";
+import { EmptyState, ErrorState, InlineError } from "@/components/design/states";
+import { LoadingRegion } from "@/components/design/loaders";
+import { StatusBadge, statusMeta } from "@/components/design/status-badge";
 
-/** Tailwind needs literal class strings, so the palette is a lookup table. */
-const LEAVE_TYPE_STYLE: Record<LeaveType, { bar: string; dot: string }> = {
-  casual: { bar: "bg-sky-500/85 border-sky-600", dot: "bg-sky-500" },
-  sick: { bar: "bg-rose-500/85 border-rose-600", dot: "bg-rose-500" },
-  annual: { bar: "bg-emerald-500/85 border-emerald-600", dot: "bg-emerald-500" },
-  unpaid: { bar: "bg-amber-500/85 border-amber-600", dot: "bg-amber-500" },
+/**
+ * One colour per leave type, app-wide.
+ *
+ * The old palette was four hardcoded Tailwind hues chosen inside this file, so a
+ * bar here never matched the same type anywhere else. The tokens come from the
+ * categorical chart palette, which is already light/dark aware, and `unpaid`
+ * stays neutral because it is tracked differently from the allocated types.
+ *
+ * `rail` is a solid bar on the leading edge of a span: it is the one part of a
+ * bar that survives truncation, so a leave that runs past the cell edge still
+ * announces its type.
+ */
+const LEAVE_TYPE_STYLE: Record<LeaveType, { bar: string; dot: string; rail: string }> = {
+  casual: { bar: "border-chart-1/40 bg-chart-1/10", dot: "bg-chart-1", rail: "bg-chart-1" },
+  sick: { bar: "border-chart-4/40 bg-chart-4/10", dot: "bg-chart-4", rail: "bg-chart-4" },
+  annual: { bar: "border-chart-2/45 bg-chart-2/12", dot: "bg-chart-2", rail: "bg-chart-2" },
+  unpaid: {
+    bar: "border-border bg-muted",
+    dot: "bg-muted-foreground",
+    rail: "bg-muted-foreground",
+  },
 };
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/**
+ * Weekends are a texture, not a colour: a hairline hatch plus a barely-there
+ * tint reads as "non-working" without competing with the leave bars for
+ * attention, and it survives both themes because it mixes with `foreground`.
+ */
+const WEEKEND_HATCH =
+  "repeating-linear-gradient(135deg, color-mix(in oklab, var(--color-foreground) 7%, transparent) 0 1px, transparent 1px 9px)";
 
 function monthKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
@@ -48,6 +78,20 @@ function toDate(value: string) {
 
 function sameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+function formatDay(iso: string) {
+  return toDate(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+}
+
+function formatLong(iso: string) {
+  return toDate(iso).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
+}
+
+function formatRange(leave: CalendarLeave) {
+  return leave.start_date === leave.end_date
+    ? formatLong(leave.start_date)
+    : `${formatDay(leave.start_date)} – ${formatDay(leave.end_date)}, ${toDate(leave.end_date).getFullYear()}`;
 }
 
 /** The 6x7 grid of cells covering the month, including the leading/trailing days. */
@@ -120,20 +164,137 @@ function buildBarSegments(leaves: CalendarLeave[], grid: { date: Date }[]): BarS
     });
   }
 
-  // Order by start date so the bars read chronologically down the week.
+  // Order by start date so the bars read chronologically across the week.
   return segments.sort((a, b) => a.startIndex - b.startIndex);
 }
 
-/** Rows of segments, one row per grid week. */
-function segmentsByWeek(segments: BarSegment[]) {
-  const rows = new Map<number, BarSegment[]>();
+/**
+ * Segments of one week, packed into as few rows as possible.
+ *
+ * Previously every bar in a week sat in the same absolutely-positioned overlay
+ * row, so two overlapping leaves drew on top of each other and hid one of them.
+ * Each segment now gets its own lane, and the row only exists when a week has
+ * leave in it.
+ */
+function packLanes(segments: BarSegment[]) {
+  const lanes: BarSegment[][] = [];
+
   for (const segment of segments) {
-    const week = Math.floor(segment.startIndex / 7);
-    const row = rows.get(week);
-    if (row) row.push(segment);
-    else rows.set(week, [segment]);
+    const lane = lanes.find(
+      (candidate) =>
+        candidate.every(
+          (placed) =>
+            placed.startIndex + placed.span <= segment.startIndex ||
+            segment.startIndex + segment.span <= placed.startIndex,
+        ),
+    );
+    if (lane) lane.push(segment);
+    else lanes.push([segment]);
   }
-  return rows;
+
+  return lanes;
+}
+
+/**
+ * A skeleton in the shape of the month grid, so the calendar does not jump when
+ * the month's leave arrives.
+ */
+/**
+ * The key states every mapping in words, so a colour is never the only thing
+ * separating one leave type, a weekend or today from another. It is rendered in
+ * both the grid and the small-screen list.
+ */
+function LeaveKey() {
+  return (
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t px-4 py-3">
+      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Leave type
+      </span>
+      {LEAVE_TYPES.map((type) => (
+        <span key={type} className="flex items-center gap-1.5 text-sm">
+          <span className={cn("size-2.5 rounded-full", LEAVE_TYPE_STYLE[type].dot)} aria-hidden />
+          {LEAVE_TYPE_LABEL[type]}
+        </span>
+      ))}
+
+      <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        <span
+          className="size-2.5 rounded-[3px] border border-border bg-muted"
+          style={{ backgroundImage: WEEKEND_HATCH }}
+          aria-hidden
+        />
+        Weekend
+      </span>
+      <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        <span className="size-2.5 rounded-full bg-primary ring-2 ring-primary/30" aria-hidden />
+        Today
+      </span>
+    </div>
+  );
+}
+
+function CalendarGridSkeleton() {
+  return (
+    <div aria-hidden>
+      <div className="grid grid-cols-7 border-b bg-muted/40">
+        {WEEKDAYS.map((day, index) => (
+          <div
+            key={day}
+            className={cn(
+              "border-r px-2 py-2 last:border-r-0",
+              (index === 0 || index === 6) && "bg-muted/70",
+            )}
+          >
+            <Skeleton className="h-3 w-7" />
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-7">
+        {Array.from({ length: 42 }).map((_, index) => {
+          const column = index % 7;
+          const week = Math.floor(index / 7);
+          // A run of cells in the second week hints at a multi-day bar without
+          // pretending to know which days are covered.
+          const inHintedBar = week === 1 && column < 4;
+          return (
+            <div
+              key={index}
+              className={cn(
+                "flex h-20 flex-col gap-1.5 border-b border-r border-border/70 p-1.5 last:border-r-0 sm:h-24",
+                (column === 0 || column === 6) && "bg-muted/40",
+              )}
+            >
+              <Skeleton className="size-7 shrink-0 rounded-full" />
+              {inHintedBar ? (
+                <Skeleton
+                  className="mt-auto h-7 w-full rounded-md"
+                  style={{ opacity: 1 - column * 0.15 }}
+                />
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function LeaveListSkeleton() {
+  return (
+    <ul className="divide-y" aria-hidden>
+      {Array.from({ length: 4 }).map((_, index) => (
+        <li key={index} className="flex items-center gap-3 px-4 py-3.5">
+          <Skeleton className="size-9 shrink-0 rounded-full" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-3.5 w-52" />
+          </div>
+          <Skeleton className="h-6 w-16 rounded-full" />
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 export function CalendarClient() {
@@ -146,6 +307,9 @@ export function CalendarClient() {
   const [loadedScope, setLoadedScope] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Date | null>(null);
+  /** The leave whose details are open, from a bar or from a day's list. */
+  const [openLeaveId, setOpenLeaveId] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
 
   // Identifies the month + filters a load belongs to, so `loading` is derived from
   // "have we fetched what is on screen yet" rather than toggled inside the effect.
@@ -226,8 +390,16 @@ export function CalendarClient() {
   // should draw — no second pass here.
   const visible = leaves;
 
-  const segments = useMemo(() => buildBarSegments(visible, grid), [visible, grid]);
-  const rows = useMemo(() => segmentsByWeek(segments), [segments]);
+  const weeks = useMemo(() => {
+    const segments = buildBarSegments(visible, grid);
+    return Array.from({ length: 6 }, (_, week) => ({
+      week,
+      days: grid.slice(week * 7, week * 7 + 7),
+      lanes: packLanes(
+        segments.filter((segment) => Math.floor(segment.startIndex / 7) === week),
+      ),
+    }));
+  }, [visible, grid]);
 
   const selectedLeaves = useMemo(
     () =>
@@ -241,48 +413,87 @@ export function CalendarClient() {
     [selected, visible],
   );
 
+  const openLeave = useMemo(
+    () => (openLeaveId ? (visible.find((leave) => leave.id === openLeaveId) ?? null) : null),
+    [openLeaveId, visible],
+  );
+
+  /** Chronological list of the month's leave, used by the small-screen layout. */
+  const monthLeaves = useMemo(
+    () =>
+      [...visible].sort(
+        (a, b) =>
+          a.start_date.localeCompare(b.start_date) ||
+          a.employee_name.localeCompare(b.employee_name),
+      ),
+    [visible],
+  );
+
   const monthLabel = anchor.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  const filtersActive = department !== "all" || team !== "all";
+  const noLeaves = !loading && !error && visible.length === 0;
+  // A failed background refresh should not wipe a month that is already on
+  // screen, so the full-page error is only used when there is nothing to show.
+  const blockingError = Boolean(error) && (loading || visible.length === 0);
+
+  const retry = () => {
+    setRetrying(true);
+    load()
+      .catch(() => {
+        /* `load` failures surface through `error` */
+      })
+      .finally(() => setRetrying(false));
+  };
+
+  const openDetails = (leave: CalendarLeave) =>
+    setOpenLeaveId((current) => (current === leave.id ? null : leave.id));
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Leave Calendar</h1>
-          <p className="text-sm text-muted-foreground">
-            Approved leave across the organisation. Click a day to see who is out.
-          </p>
-        </div>
+      <PageHeader
+        title="Leave Calendar"
+        description="Approved and pending leave across the organisation. Select a day to see who is out, or open a leave for the full detail."
+        actions={
+          <>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setAnchor((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
+              aria-label="Previous month"
+            >
+              <ChevronLeft className="size-4" aria-hidden />
+            </Button>
 
+            <span
+              className="min-w-32 text-center text-card-title font-semibold tabular"
+              aria-live="polite"
+            >
+              {monthLabel}
+            </span>
+
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setAnchor((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
+              aria-label="Next month"
+            >
+              <ChevronRight className="size-4" aria-hidden />
+            </Button>
+
+            <Button variant="secondary" onClick={() => setAnchor(new Date())}>
+              Today
+            </Button>
+          </>
+        }
+      >
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setAnchor((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
-            aria-label="Previous month"
-          >
-            <ChevronLeft className="size-4" aria-hidden />
-          </Button>
+          <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <SlidersHorizontal className="size-3.5" aria-hidden />
+            Filters
+          </span>
 
-          <span className="min-w-40 text-center font-medium">{monthLabel}</span>
-
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setAnchor((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
-            aria-label="Next month"
-          >
-            <ChevronRight className="size-4" aria-hidden />
-          </Button>
-
-          <Button variant="ghost" size="sm" onClick={() => setAnchor(new Date())}>
-            Today
-          </Button>
-
-          <Select
-            value={team}
-            onValueChange={(value) => setTeam(value ?? "all")}
-          >
-            <SelectTrigger className="w-44" aria-label="Filter by team">
+          <Select value={team} onValueChange={(value) => setTeam(value ?? "all")}>
+            <SelectTrigger className="w-full sm:w-44" aria-label="Filter by team">
               <SelectValue placeholder="All teams" />
             </SelectTrigger>
             <SelectContent>
@@ -296,7 +507,7 @@ export function CalendarClient() {
           </Select>
 
           <Select value={department} onValueChange={(value) => setDepartment(value ?? "all")}>
-            <SelectTrigger className="w-48" aria-label="Filter by department">
+            <SelectTrigger className="w-full sm:w-48" aria-label="Filter by department">
               <SelectValue placeholder="All departments" />
             </SelectTrigger>
             <SelectContent>
@@ -308,122 +519,382 @@ export function CalendarClient() {
               ))}
             </SelectContent>
           </Select>
+
+          {filtersActive ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setDepartment("all");
+                setTeam("all");
+              }}
+            >
+              <X className="size-4" aria-hidden />
+              Clear
+            </Button>
+          ) : null}
+
+          <span className="ml-auto text-sm text-muted-foreground" aria-live="polite">
+            {loading
+              ? `Loading ${monthLabel}…`
+              : `${visible.length} ${visible.length === 1 ? "request" : "requests"} in ${monthLabel}`}
+          </span>
         </div>
-      </div>
+      </PageHeader>
 
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {loading ? <LoadingRegion label={`Loading leave for ${monthLabel}`} /> : null}
 
-      <Card>
-        <CardContent className="p-0">
-          <div className="grid grid-cols-7 border-b bg-muted/40">
-            {WEEKDAYS.map((day) => (
-              <div key={day} className="px-2 py-2 text-xs font-medium text-muted-foreground">
-                {day}
-              </div>
-            ))}
-          </div>
-
-          <div className="relative">
-            {/* Day numbers sit behind the bars, so each week is one grid row. */}
-            <div className="grid grid-cols-7">
-              {grid.map(({ date, inMonth, isWeekend }, index) => {
-                const isToday = sameDay(date, today);
-                return (
-                  <button
-                    key={index}
-                    type="button"
-                    onClick={() => setSelected(date)}
-                    aria-label={date.toLocaleDateString("en-IN", {
-                      weekday: "long",
-                      day: "numeric",
-                      month: "long",
-                    })}
-                    aria-pressed={selected ? sameDay(selected, date) : false}
-                    className={`relative h-28 border-b border-r p-1 text-left align-top transition-colors hover:bg-accent/40 ${
-                      isWeekend ? "bg-muted/30" : ""
-                    } ${inMonth ? "" : "text-muted-foreground/40"}`}
-                  >
-                    <span
-                      className={`inline-flex size-6 items-center justify-center rounded-full text-xs ${
-                        isToday ? "bg-primary font-semibold text-primary-foreground" : "text-muted-foreground"
-                      }`}
-                    >
-                      {date.getDate()}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Bars overlay the grid, one absolute row per week. */}
-            <div className="pointer-events-none absolute inset-0">
-              {Array.from({ length: 6 }).map((_, week) => (
-                <div key={week} className="grid h-28 grid-cols-7">
-                  {WEEKDAYS.map((day) => (
-                    <div key={day} className="h-28 border-b border-r last:border-r-0" />
-                  ))}
-                </div>
-              ))}
-
-              {Array.from({ length: 6 }).map((_, week) => {
-                const weekSegments = rows.get(week) ?? [];
-                if (weekSegments.length === 0) return null;
-                return (
-                  <div
-                    key={`bars-${week}`}
-                    className="absolute grid w-full grid-cols-7"
-                    style={{ top: `${week * 7}rem`, height: "7rem" }}
-                  >
-                    {weekSegments.map((segment) => {
-                      const { leave, span, continuesBefore, continuesAfter } = segment;
-                      const style = LEAVE_TYPE_STYLE[leave.leave_type];
-                      return (
-                        <div
-                          key={segment.key}
-                          className="px-0.5 pt-7"
-                          style={{ gridColumn: `${segment.startIndex + 1} / span ${span}` }}
-                        >
-                          <div
-                            title={`${leave.employee_name} · ${LEAVE_TYPE_LABEL[leave.leave_type]} · ${leave.start_date} → ${leave.end_date}`}
-                            className={`flex h-6 items-center gap-1 overflow-hidden border px-1.5 text-[11px] leading-none text-white ${style.bar} ${
-                              continuesBefore ? "rounded-l-none border-l-0" : "rounded-l-md"
-                            } ${continuesAfter ? "rounded-r-none border-r-0" : "rounded-r-md"}`}
-                          >
-                            <span className="truncate font-medium">{leave.employee_name}</span>
-                            <span className="ml-auto shrink-0 tabular-nums opacity-90">
-                              {Number(leave.days) === 1 ? "1d" : `${Number(leave.days)}d`}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
+      {blockingError ? (
+        <ErrorState message={error} onRetry={retry} retrying={retrying || loading} />
+      ) : error ? (
+        <InlineError message={error} onRetry={retry} />
+      ) : noLeaves ? (
+        <EmptyState
+          icon={CalendarDays}
+          title={`No leave in ${monthLabel}`}
+          description={
+            filtersActive
+              ? "No one matches the current team and department filters. Clear them to see the whole organisation."
+              : "Nobody has leave booked this month."
+          }
+          action={
+            filtersActive ? (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setDepartment("all");
+                  setTeam("all");
+                }}
+              >
+                Clear filters
+              </Button>
+            ) : undefined
+          }
+        />
+      ) : (
+        <>
+          <Card className="hidden overflow-hidden md:block">
+            <CardContent className="p-0">
+              {loading ? (
+                <CalendarGridSkeleton />
+              ) : (
+                <>
+                  <div className="grid grid-cols-7 border-b bg-muted/40">
+                    {WEEKDAYS.map((day, index) => (
+                      <div
+                        key={day}
+                        className={cn(
+                          "border-r px-2 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground last:border-r-0",
+                          (index === 0 || index === 6) && "bg-muted/70 text-foreground/70",
+                        )}
+                        style={
+                          index === 0 || index === 6 ? { backgroundImage: WEEKEND_HATCH } : undefined
+                        }
+                      >
+                        {day}
+                      </div>
+                    ))}
                   </div>
-                );
-              })}
-            </div>
-          </div>
 
-          {loading ? (
-            <p className="border-t p-3 text-xs text-muted-foreground">Loading…</p>
-          ) : (
-            <div className="flex flex-wrap items-center gap-4 border-t p-3 text-sm">
-              <span className="font-medium">Leave type</span>
-              {LEAVE_TYPES.map((type) => (
-                <span key={type} className="flex items-center gap-1.5">
-                  <span className={`size-2.5 rounded-full ${LEAVE_TYPE_STYLE[type].dot}`} aria-hidden />
-                  {LEAVE_TYPE_LABEL[type]}
-                </span>
-              ))}
+                  <TooltipProvider delay={120}>
+                    <div className="divide-y">
+                      {weeks.map(({ week, days, lanes }) => (
+                        <div key={week} className="animate-of-fade-in">
+                          <div className="grid grid-cols-7">
+                            {days.map(({ date, inMonth, isWeekend }, index) => {
+                              const isToday = sameDay(date, today);
+                              const isSelected = selected ? sameDay(selected, date) : false;
+                              return (
+                                <button
+                                  key={`${week}-${index}`}
+                                  type="button"
+                                  onClick={() => setSelected(date)}
+                                  aria-label={`${date.toLocaleDateString("en-IN", {
+                                    weekday: "long",
+                                    day: "numeric",
+                                    month: "long",
+                                  })}${isToday ? ", today" : ""}${isWeekend ? ", weekend" : ""}`}
+                                  aria-pressed={isSelected}
+                                  style={
+                                    isWeekend ? { backgroundImage: WEEKEND_HATCH } : undefined
+                                  }
+                                  className={cn(
+                                    "flex h-20 flex-col items-start gap-1 border-r border-border/70 p-1.5 text-left transition-colors duration-150 last:border-r-0 hover:bg-accent/40 sm:h-24",
+                                    isWeekend && "bg-muted/40",
+                                    !inMonth && "text-muted-foreground/50",
+                                    isSelected && "bg-accent/60 ring-2 ring-inset ring-primary/40",
+                                    isToday && "bg-primary/6 ring-2 ring-inset ring-primary",
+                                  )}
+                                >
+                                  <span
+                                    className={cn(
+                                      "inline-flex size-7 shrink-0 items-center justify-center rounded-full text-xs tabular",
+                                      isToday
+                                        ? "bg-primary font-semibold text-primary-foreground"
+                                        : "text-muted-foreground",
+                                    )}
+                                  >
+                                    {date.getDate()}
+                                  </span>
+                                  {isToday ? (
+                                    <span className="text-2xs font-semibold uppercase leading-none tracking-wide text-primary">
+                                      Today
+                                    </span>
+                                  ) : null}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {lanes.map((lane, laneIndex) => (
+                            <div key={`${week}-lane-${laneIndex}`} className="grid grid-cols-7">
+                              {lane.map((segment) => {
+                                const { leave, span, continuesBefore, continuesAfter } = segment;
+                                const style = LEAVE_TYPE_STYLE[leave.leave_type];
+                                const status = statusMeta(leave.status);
+                                const StatusIcon = status.icon;
+                                const isOpen = openLeaveId === leave.id;
+                                return (
+                                  <Tooltip key={segment.key}>
+                                    <TooltipTrigger
+                                      type="button"
+                                      aria-label={`${leave.employee_name}, ${LEAVE_TYPE_LABEL[leave.leave_type]} leave, ${formatRange(leave)}, ${Number(leave.days)} ${Number(leave.days) === 1 ? "day" : "days"}. Open details.`}
+                                      aria-expanded={isOpen}
+                                      onClick={() => openDetails(leave)}
+                                      style={{ gridColumn: `${segment.startIndex + 1} / span ${span}` }}
+                                      className={cn(
+                                        "mx-0.5 my-0.5 flex h-7 min-w-0 items-center gap-1.5 border text-left text-xs transition-[box-shadow,border-color] duration-150 hover:shadow-md",
+                                        style.bar,
+                                        continuesBefore ? "ml-0 rounded-l-none" : "rounded-l-md",
+                                        continuesAfter ? "mr-0 rounded-r-none" : "rounded-r-md",
+                                        isOpen && "shadow-md ring-2 ring-foreground/30",
+                                      )}
+                                    >
+                                      <span
+                                        className={cn(
+                                          "h-4 w-1 shrink-0 self-stretch rounded-full",
+                                          style.rail,
+                                          continuesBefore && "opacity-40",
+                                        )}
+                                        aria-hidden
+                                      />
+                                      <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+                                        {leave.employee_name}
+                                      </span>
+                                      <span className="shrink-0 text-xs font-medium tabular text-muted-foreground">
+                                        {Number(leave.days) === 1 ? "1d" : `${Number(leave.days)}d`}
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent
+                                      side="top"
+                                      className="max-w-72 flex-col items-start gap-1 p-3 text-left"
+                                    >
+                                      <p className="text-sm font-semibold">{leave.employee_name}</p>
+                                      <p className="text-xs opacity-80">{leave.employee_department}</p>
+                                      <p className="mt-1 flex items-center gap-1.5 text-xs">
+                                        <span className={cn("size-2 rounded-full", style.dot)} aria-hidden />
+                                        {LEAVE_TYPE_LABEL[leave.leave_type]} · {Number(leave.days)}{" "}
+                                        {Number(leave.days) === 1 ? "working day" : "working days"}
+                                      </p>
+                                      <p className="text-xs tabular opacity-80">{formatRange(leave)}</p>
+                                      {/* The popup is dark, so the status is stated with
+                                          its icon and word rather than a soft badge. */}
+                                      <p className="mt-0.5 flex items-center gap-1.5 text-xs">
+                                        <StatusIcon className="size-3.5" aria-hidden />
+                                        {status.label}
+                                      </p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                );
+                              })}
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </TooltipProvider>
+
+                  <LeaveKey />
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Below `md` seven columns cannot hold a readable name, so the month is
+              given as a list instead of a squeezed grid. */}
+          <Card className="overflow-hidden md:hidden">
+            <CardContent className="p-0">
+              <div className="flex items-center justify-between gap-2 border-b bg-muted/40 px-4 py-2.5">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Leave in {monthLabel}
+                </p>
+                <p className="text-sm text-muted-foreground">{visible.length} requests</p>
+              </div>
+
+              {loading ? (
+                <LeaveListSkeleton />
+              ) : monthLeaves.length === 0 ? (
+                <EmptyState
+                  icon={CalendarDays}
+                  title="No leave this month"
+                  description="Nobody has leave booked in this month."
+                  className="border-0 py-10"
+                />
+              ) : (
+                <ul className="divide-y">
+                  {monthLeaves.map((leave) => {
+                    const style = LEAVE_TYPE_STYLE[leave.leave_type];
+                    const isOpen = openLeaveId === leave.id;
+                    return (
+                      <li key={leave.id}>
+                        <button
+                          type="button"
+                          onClick={() => openDetails(leave)}
+                          aria-expanded={isOpen}
+                          className={cn(
+                            "flex w-full items-center gap-3 px-4 py-3 text-left transition-colors duration-150 hover:bg-accent/40",
+                            isOpen && "bg-accent/60",
+                          )}
+                        >
+                          <span
+                            className={cn("h-10 w-1 shrink-0 rounded-full", style.rail)}
+                            aria-hidden
+                          />
+                          <Avatar>
+                            {leave.employee_photo ? (
+                              <AvatarImage src={leave.employee_photo} alt="" />
+                            ) : (
+                              <AvatarFallback>{initials(leave.employee_name)}</AvatarFallback>
+                            )}
+                          </Avatar>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium">
+                              {leave.employee_name}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground tabular">
+                              {LEAVE_TYPE_LABEL[leave.leave_type]} · {formatRange(leave)} ·{" "}
+                              {Number(leave.days)}{" "}
+                              {Number(leave.days) === 1 ? "day" : "days"}
+                            </span>
+                          </span>
+                          <StatusBadge status={leave.status} className="shrink-0" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
+              <LeaveKey />
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {/* Announced when the detail area changes in place. */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {openLeave
+          ? `Showing details for ${openLeave.employee_name}, ${LEAVE_TYPE_LABEL[openLeave.leave_type]} leave.`
+          : selected
+            ? `Showing everyone on leave on ${selected.toLocaleDateString("en-IN", { day: "numeric", month: "long" })}.`
+            : ""}
+      </p>
+
+      {openLeave ? (
+        <Card className="animate-of-rise border-l-4 border-l-primary">
+          <CardContent className="p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <Avatar size="lg">
+                  {openLeave.employee_photo ? (
+                    <AvatarImage src={openLeave.employee_photo} alt="" />
+                  ) : (
+                    <AvatarFallback>{initials(openLeave.employee_name)}</AvatarFallback>
+                  )}
+                </Avatar>
+                <div className="min-w-0">
+                  <h2 className="truncate text-card-title font-semibold">
+                    {openLeave.employee_name}
+                  </h2>
+                  <p className="truncate text-sm text-muted-foreground">
+                    {openLeave.employee_department}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <StatusBadge status={openLeave.status} />
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Close leave details"
+                  onClick={() => setOpenLeaveId(null)}
+                >
+                  <X className="size-4" aria-hidden />
+                </Button>
+              </div>
             </div>
-          )}
-        </CardContent>
-      </Card>
+
+            <dl className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Leave type
+                </dt>
+                <dd className="mt-1.5 flex items-center gap-1.5 text-body">
+                  <span
+                    className={cn("size-2.5 rounded-full", LEAVE_TYPE_STYLE[openLeave.leave_type].dot)}
+                    aria-hidden
+                  />
+                  {LEAVE_TYPE_LABEL[openLeave.leave_type]}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Dates
+                </dt>
+                <dd className="mt-1.5 text-body tabular">{formatRange(openLeave)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Working days
+                </dt>
+                <dd className="mt-1.5 text-body tabular">{openLeave.days}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Requested on
+                </dt>
+                <dd className="mt-1.5 text-body tabular">
+                  {openLeave.created_at ? formatDay(openLeave.created_at.slice(0, 10)) : "—"}
+                </dd>
+              </div>
+            </dl>
+
+            <div className="mt-5 border-t pt-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Reason
+              </p>
+              <p className="mt-1.5 text-body">
+                {openLeave.reason?.trim() ? openLeave.reason : "No reason given."}
+              </p>
+              {openLeave.manager_comment ? (
+                <>
+                  <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Manager note
+                  </p>
+                  <p className="mt-1.5 text-body">{openLeave.manager_comment}</p>
+                </>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {selected ? (
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="font-medium">
+        <Card className="animate-of-rise">
+          <CardContent className="p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-card-title font-semibold">
                 {selected.toLocaleDateString("en-IN", {
                   weekday: "long",
                   day: "numeric",
@@ -437,36 +908,60 @@ export function CalendarClient() {
             </div>
 
             {selectedLeaves.length === 0 ? (
-              <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
-                <CalendarDays className="size-4" aria-hidden />
-                Nobody is on approved leave on this day.
-              </p>
+              <EmptyState
+                icon={CalendarDays}
+                title="Nobody is on leave"
+                description="No approved leave covers this day."
+                className="mt-4 border-0 py-8"
+              />
             ) : (
-              <ul className="mt-3 space-y-2">
-                {selectedLeaves.map((leave) => (
-                  <li key={leave.id} className="flex items-center gap-3 rounded-md border p-2">
-                    <Avatar size="sm">
-                      {leave.employee_photo ? (
-                        <AvatarImage src={leave.employee_photo} alt="" />
-                      ) : (
-                        <AvatarFallback>{initials(leave.employee_name)}</AvatarFallback>
-                      )}
-                    </Avatar>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{leave.employee_name}</p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {leave.employee_department} · {leave.start_date} → {leave.end_date}
-                      </p>
-                    </div>
-                    <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-                      <span
-                        className={`size-2.5 rounded-full ${LEAVE_TYPE_STYLE[leave.leave_type].dot}`}
-                        aria-hidden
-                      />
-                      {LEAVE_TYPE_LABEL[leave.leave_type]}
-                    </span>
-                  </li>
-                ))}
+              <ul className="mt-4 space-y-2">
+                {selectedLeaves.map((leave) => {
+                  const style = LEAVE_TYPE_STYLE[leave.leave_type];
+                  const isOpen = openLeaveId === leave.id;
+                  return (
+                    <li key={leave.id}>
+                      <button
+                        type="button"
+                        onClick={() => openDetails(leave)}
+                        aria-expanded={isOpen}
+                        className={cn(
+                          "flex w-full items-center gap-3 rounded-lg border p-2.5 text-left transition-colors duration-150 hover:bg-accent/40",
+                          isOpen && "bg-accent/60 ring-1 ring-primary/40",
+                        )}
+                      >
+                        <span
+                          className={cn("h-9 w-1 shrink-0 rounded-full", style.rail)}
+                          aria-hidden
+                        />
+                        <Avatar size="sm">
+                          {leave.employee_photo ? (
+                            <AvatarImage src={leave.employee_photo} alt="" />
+                          ) : (
+                            <AvatarFallback>{initials(leave.employee_name)}</AvatarFallback>
+                          )}
+                        </Avatar>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium">
+                            {leave.employee_name}
+                          </span>
+                          <span className="block truncate text-xs text-muted-foreground tabular">
+                            {leave.employee_department} · {formatRange(leave)} ·{" "}
+                            {Number(leave.days)}d
+                          </span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+                          <span
+                            className={cn("size-2.5 rounded-full", style.dot)}
+                            aria-hidden
+                          />
+                          {LEAVE_TYPE_LABEL[leave.leave_type]}
+                        </span>
+                        <StatusBadge status={leave.status} className="shrink-0" />
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </CardContent>

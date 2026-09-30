@@ -12,7 +12,16 @@
  * manager/HR only — the same rule `/api/alerts/refresh` enforces.
  */
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Bell, Check, Loader2, RefreshCw } from "lucide-react";
+import Link from "next/link";
+import {
+  AlertTriangle,
+  Bell,
+  Check,
+  CircleAlert,
+  Info,
+  Loader2,
+  RefreshCw,
+} from "lucide-react";
 import { apiFetch } from "@/shared/api-client";
 import { createClient } from "@/shared/supabase-client";
 import type { AlertSeverity, AlertsFeed, AppRole } from "@/shared/types";
@@ -20,10 +29,18 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 
-const SEVERITY_STYLE: Record<AlertSeverity, string> = {
-  info: "border-border bg-card",
-  warning: "border-amber-200 bg-amber-50",
-  critical: "border-red-200 bg-red-50",
+/**
+ * Severity is carried by an icon and a word, not by a background tint alone: the
+ * same three states the full alert page uses, so a colour learned in one place
+ * means the same thing in the other.
+ */
+const SEVERITY: Record<
+  AlertSeverity,
+  { icon: typeof Info; chip: string; word: string }
+> = {
+  info: { icon: Info, chip: "bg-info/12 text-info-foreground", word: "Info" },
+  warning: { icon: AlertTriangle, chip: "bg-warning/15 text-warning-foreground", word: "Warning" },
+  critical: { icon: CircleAlert, chip: "bg-destructive/10 text-destructive", word: "Critical" },
 };
 
 function relativeTime(iso: string) {
@@ -128,16 +145,23 @@ export function AlertBell({ appRole }: { appRole: AppRole }) {
         {unread > 0 ? (
           <span
             data-slot="alert-count"
-            className="absolute -right-0.5 -top-0.5 grid min-w-4 place-items-center rounded-full bg-red-600 px-1 text-[0.6rem] font-semibold text-white"
+            className="absolute -right-0.5 -top-0.5 grid min-w-4.5 place-items-center rounded-full bg-destructive px-1 text-2xs leading-none font-semibold text-white ring-2 ring-background"
           >
             {unread > 9 ? "9+" : unread}
           </span>
         ) : null}
       </PopoverTrigger>
 
-      <PopoverContent align="end" className="w-96 p-0">
-        <div className="flex items-center justify-between gap-2 p-3">
-          <p className="text-sm font-semibold">Alerts</p>
+      <PopoverContent align="end" className="w-[min(24rem,calc(100vw-2rem))] p-0">
+        <div className="flex items-center justify-between gap-2 px-4 py-3">
+          <p className="text-card-title font-semibold">
+            Alerts
+            {unread > 0 ? (
+              <span className="ml-2 text-sm font-normal text-muted-foreground">
+                {unread} unread
+              </span>
+            ) : null}
+          </p>
           {canGenerate ? (
             <Button
               variant="ghost"
@@ -157,15 +181,16 @@ export function AlertBell({ appRole }: { appRole: AppRole }) {
         </div>
         <Separator />
 
-        <div className="max-h-96 overflow-y-auto">
+        <div className="scrollbar-slim max-h-96 overflow-y-auto">
           {!feed || feed.alerts.length === 0 ? (
-            <p className="p-4 text-sm text-muted-foreground">
+            <p className="px-4 py-8 text-center text-sm text-muted-foreground">
               Nothing needs your attention right now.
             </p>
           ) : (
             <ul>
               {feed.alerts.map((alert) => {
                 const severity = (alert.severity as AlertSeverity) ?? "info";
+                const Severity = SEVERITY[severity].icon;
                 return (
                   <li key={alert.id} className="border-b last:border-b-0">
                     <div
@@ -173,20 +198,26 @@ export function AlertBell({ appRole }: { appRole: AppRole }) {
                       data-type={alert.type}
                       data-severity={severity}
                       data-read={alert.is_read ? "true" : "false"}
-                      className={`flex gap-2 p-3 ${alert.is_read ? "opacity-60" : SEVERITY_STYLE[severity]}`}
+                      className={`flex gap-3 px-4 py-3 ${alert.is_read ? "opacity-60" : ""}`}
                     >
-                      <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+                      <span
+                        className={`mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg ${SEVERITY[severity].chip}`}
+                        title={SEVERITY[severity].word}
+                      >
+                        <Severity className="size-4" aria-hidden />
+                        <span className="sr-only">{SEVERITY[severity].word}</span>
+                      </span>
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm">{alert.message}</p>
+                        <p className="text-sm leading-relaxed">{alert.message}</p>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {relativeTime(alert.created_at)}
+                          {SEVERITY[severity].word} · {relativeTime(alert.created_at)}
                           {alert.related_date ? ` · ${alert.related_date}` : ""}
                         </p>
                       </div>
                       <Button
                         variant="ghost"
-                        size="icon"
-                        className="size-7 shrink-0"
+                        size="icon-sm"
+                        className="shrink-0"
                         onClick={() => markRead(alert.id, !alert.is_read)}
                         aria-label={alert.is_read ? "Mark as unread" : "Mark as read"}
                         title={alert.is_read ? "Mark as unread" : "Mark as read"}
@@ -204,6 +235,21 @@ export function AlertBell({ appRole }: { appRole: AppRole }) {
             </ul>
           )}
         </div>
+
+        {canGenerate ? (
+          <>
+            <Separator />
+            <div className="p-2">
+              <Link
+                href="/alerts"
+                onClick={() => setOpen(false)}
+                className="block rounded-md px-2 py-1.5 text-center text-sm font-medium text-primary transition-colors hover:bg-accent"
+              >
+                View all alerts
+              </Link>
+            </div>
+          </>
+        ) : null}
       </PopoverContent>
     </Popover>
   );

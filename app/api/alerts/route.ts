@@ -25,7 +25,11 @@ export async function GET() {
 
     const { data, error } = await supabase
       .from("alerts")
-      .select("id, scope_employee_id, type, severity, message, related_date, created_at, is_read")
+      .select(
+        // `related_request_id` lets the UI link an alert back to the request that
+        // raised it, which is what makes an approval handover clickable.
+        "id, scope_employee_id, type, severity, message, related_date, related_request_id, dedupe_key, created_at, is_read",
+      )
       .order("created_at", { ascending: false })
       .limit(MAX_ALERTS);
 

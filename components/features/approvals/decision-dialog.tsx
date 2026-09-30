@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Check, Loader2, X } from "lucide-react";
 import { apiFetch, ClientApiError } from "@/shared/api-client";
 import { LEAVE_TYPE_LABEL } from "@/server/leave";
 import type { ApprovalRequest, LeaveRequest } from "@/shared/types";
 import { LeaveImpactPanel } from "@/components/features/approvals/leave-impact-panel";
+import { ApprovalTimeline } from "@/components/features/approvals/approval-timeline";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -113,11 +114,15 @@ export function DecisionDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            {isApprove ? (
-              <ThumbsUp className="size-5" aria-hidden />
-            ) : (
-              <ThumbsDown className="size-5" aria-hidden />
-            )}
+            <span
+              className={
+                isApprove
+                  ? "grid size-9 place-items-center rounded-lg bg-success/12 text-success-foreground"
+                  : "grid size-9 place-items-center rounded-lg bg-destructive/10 text-destructive"
+              }
+            >
+              {isApprove ? <Check className="size-5" aria-hidden /> : <X className="size-5" aria-hidden />}
+            </span>
             {isApprove ? "Approve leave request" : "Reject leave request"}
           </DialogTitle>
           <DialogDescription>
@@ -139,32 +144,43 @@ export function DecisionDialog({
               </Avatar>
               <div className="min-w-0">
                 <p className="truncate font-medium">{request.employee_name}</p>
-                <p className="truncate text-xs text-muted-foreground">
+                <p className="truncate text-sm text-muted-foreground">
                   {request.employee_role} · {request.employee_department}
                 </p>
               </div>
             </div>
 
-            <dl className="grid grid-cols-2 gap-3 text-sm">
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
               <div>
                 <dt className="text-xs text-muted-foreground">Type</dt>
-                <dd>
+                <dd className="mt-1">
                   <Badge variant="outline">{LEAVE_TYPE_LABEL[request.leave_type]}</Badge>
                 </dd>
               </div>
               <div>
                 <dt className="text-xs text-muted-foreground">Duration</dt>
-                <dd className="tabular-nums">{request.days} working days</dd>
+                <dd className="tabular mt-1 font-medium">{request.days} working days</dd>
               </div>
               <div className="col-span-2">
                 <dt className="text-xs text-muted-foreground">Dates</dt>
-                <dd>{formatRange(request.start_date, request.end_date)}</dd>
+                <dd className="mt-1 font-medium">
+                  {formatRange(request.start_date, request.end_date)}
+                </dd>
               </div>
               <div className="col-span-2">
                 <dt className="text-xs text-muted-foreground">Reason given</dt>
-                <dd className="text-muted-foreground">{request.reason}</dd>
+                <dd className="mt-1 leading-relaxed text-muted-foreground">{request.reason}</dd>
               </div>
             </dl>
+
+            {/* Where this request sits in its chain, so the person deciding knows
+                whether their signature is the last one. */}
+            <div className="rounded-lg border bg-muted/30 p-3">
+              <p className="mb-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Approval progress
+              </p>
+              <ApprovalTimeline steps={request.approval_chain} status={request.status} compact />
+            </div>
 
             {/* The cost of saying yes: team size, who is already away across
                 these dates, and the risk the database assigns. It is advisory —
@@ -194,7 +210,10 @@ export function DecisionDialog({
             </div>
 
             {error ? (
-              <p className="text-sm text-destructive" role="alert">
+              <p
+                role="alert"
+                className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm text-destructive"
+              >
                 {error}
               </p>
             ) : null}
@@ -213,9 +232,22 @@ export function DecisionDialog({
             variant={isApprove ? "default" : "destructive"}
             onClick={submit}
             disabled={!canSubmit || submitting}
+            aria-busy={submitting}
           >
-            {submitting ? <Loader2 className="animate-spin" aria-hidden /> : null}
-            {isApprove ? "Approve request" : "Reject request"}
+            {submitting ? (
+              <Loader2 className="animate-spin" aria-hidden />
+            ) : isApprove ? (
+              <Check aria-hidden />
+            ) : (
+              <X aria-hidden />
+            )}
+            {submitting
+              ? isApprove
+                ? "Approving…"
+                : "Rejecting…"
+              : isApprove
+                ? "Approve request"
+                : "Reject request"}
           </Button>
         </DialogFooter>
       </DialogContent>
