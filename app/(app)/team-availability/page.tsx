@@ -9,7 +9,7 @@ export const metadata = { title: "Team Availability" };
  * route gate are the enforcement.
  */
 export default async function TeamAvailabilityPage() {
-  await redirectUnlessRole("manager", "hr");
+  await redirectUnlessRole("manager", "hr", "admin");
 
   return <AvailabilityClient />;
 }

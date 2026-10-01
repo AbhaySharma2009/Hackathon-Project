@@ -16,7 +16,9 @@
     "verify:demo": "tsx scripts/verify-demo.ts",
     "verify:approvals": "tsx scripts/verify-approval-hierarchy.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "verify:cancel": "tsx scripts/verify-cancellation.ts",
+    "verify:roles": "tsx scripts/verify-roles.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

@@ -56,8 +56,9 @@ begin
       using errcode = '42501';
   end if;
 
-  if v_role <> 'hr' then
-    raise exception 'FORBIDDEN: Smart HR Query is limited to HR'
+  -- Admin inherits HR's remit for org-wide analysis.
+  if v_role is distinct from 'hr' and v_role is distinct from 'admin' then
+    raise exception 'FORBIDDEN: Smart HR Query is limited to HR and Admin'
       using errcode = '42501';
   end if;
 end;

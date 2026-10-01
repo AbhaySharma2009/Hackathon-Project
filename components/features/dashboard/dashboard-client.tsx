@@ -9,6 +9,7 @@
  * role gates are exactly as strict as before; this component only decides what
  * to show with the data it is already given.
  */
+import type { AppRole } from "@/shared/types";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
@@ -68,7 +69,7 @@ export function DashboardClient({
 }: {
   employeeId: string;
   name: string;
-  appRole: "employee" | "manager" | "hr";
+  appRole: AppRole;
 }) {
   const [balances, setBalances] = useState<BalanceRow[]>([]);
   const [requests, setRequests] = useState<MyLeaveRequest[]>([]);

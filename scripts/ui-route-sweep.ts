@@ -9,6 +9,7 @@
  *   npx tsx scripts/ui-route-sweep.ts
  */
 import { config } from "dotenv";
+import { navForRole } from "../shared/nav";
 import { createServerClient } from "@supabase/ssr";
 
 config({ path: ".env.local" });
@@ -17,14 +18,16 @@ config();
 const APP_URL = process.env.APP_URL ?? "http://localhost:3000";
 const PASSWORD = process.env.DEMO_PASSWORD ?? "OrgFlow@2026";
 
-type Role = "employee" | "manager" | "hr";
+type Role = "employee" | "manager" | "hr" | "admin";
 
 const ACCOUNTS: Record<Role, string> = {
   employee: "neha.gupta@orgflow.dev",
   manager: "sanjay.kapoor@orgflow.dev",
   hr: "rohan.iyer@orgflow.dev",
+  admin: "meera.krishnan@orgflow.dev",
 };
 
+/** Every page a role might be sent to, permitted or not. */
 const ROUTES = [
   "/dashboard",
   "/my-leaves",
@@ -36,23 +39,33 @@ const ROUTES = [
   "/hr-dashboard",
   "/alerts",
   "/smart-hr-query",
+  "/admin",
+  "/admin/users",
+  "/admin/departments",
+  "/admin/approval-hierarchy",
+  "/admin/activity",
 ] as const;
 
-/** Routes each role is expected to reach; the rest must redirect them away. */
+/**
+ * Routes each role is expected to reach; every other route must redirect them away.
+ *
+ * Derived from `navForRole` rather than written out, because the navigation *is*
+ * the specification of who can see what. A hand-kept copy drifted once already,
+ * leaving a manager pointing at an HR-only dashboard that answered FORBIDDEN.
+ */
 const EXPECTED: Record<Role, string[]> = {
-  employee: ["/dashboard", "/my-leaves", "/calendar", "/directory", "/org-chart"],
-  manager: [
-    "/dashboard",
-    "/my-leaves",
-    "/calendar",
-    "/directory",
-    "/org-chart",
-    "/approvals",
-    "/team-availability",
-    "/hr-dashboard",
-    "/alerts",
-  ],
-  hr: ROUTES as unknown as string[],
+  employee: navForRole("employee").map((item) => item.href),
+  manager: navForRole("manager").map((item) => item.href),
+  hr: navForRole("hr").map((item) => item.href),
+  admin: navForRole("admin").map((item) => item.href),
+};
+
+/** Where each role lands after signing in. Mirrors `homeForRole`. */
+const LANDING: Record<Role, string> = {
+  employee: "/dashboard",
+  manager: "/dashboard",
+  hr: "/hr-dashboard",
+  admin: "/admin",
 };
 
 /**
@@ -144,6 +157,10 @@ async function main() {
   for (const role of Object.keys(ACCOUNTS) as Role[]) {
     console.log(`\n${role}:`);
     const cookie = await cookieFor(ACCOUNTS[role]);
+
+    // The landing page each role is sent to on sign-in.
+    await checkRoute(role, cookie, LANDING[role]);
+
     for (const route of ROUTES) {
       await checkRoute(role, cookie, route);
     }

@@ -7,9 +7,12 @@ import {
   CalendarDays,
   CalendarRange,
   ClipboardCheck,
+  GitBranch,
   LayoutDashboard,
   Network,
+  ScrollText,
   Search,
+  ShieldCheck,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -28,6 +31,10 @@ const ICONS: Record<NavIcon, LucideIcon> = {
   alerts: Bell,
   hr: LayoutDashboard,
   query: Search,
+  admin: ShieldCheck,
+  users: Users,
+  hierarchy: GitBranch,
+  activity: ScrollText,
 };
 
 export function navIcon(name: NavIcon): LucideIcon {

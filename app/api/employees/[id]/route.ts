@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ApiError, toErrorResponse } from "@/server/api/errors";
-import { requireHr, requireSession } from "@/server/api/session";
+import { requireHrOrAdmin, requireSession } from "@/server/api/session";
 import { DIRECTORY_COLUMNS, assertNoManagerCycle, employeeUpdateSchema, parseBody } from "@/server/employees";
 
 type Context = { params: Promise<{ id: string }> };
@@ -86,7 +86,7 @@ export async function PATCH(request: NextRequest, context: Context) {
     const { id } = await context.params;
     if (!UUID_RE.test(id)) throw new ApiError("VALIDATION", "Invalid employee id.");
 
-    const session = await requireHr();
+    const session = await requireHrOrAdmin();
     const body = parseBody(employeeUpdateSchema, await readJson(request));
 
     const { data: existing } = await session.supabase
@@ -138,7 +138,7 @@ export async function DELETE(request: NextRequest, context: Context) {
     const { id } = await context.params;
     if (!UUID_RE.test(id)) throw new ApiError("VALIDATION", "Invalid employee id.");
 
-    const session = await requireHr();
+    const session = await requireHrOrAdmin();
 
     if (id === session.employee.id) {
       throw new ApiError("VALIDATION", "You cannot deactivate your own account.");

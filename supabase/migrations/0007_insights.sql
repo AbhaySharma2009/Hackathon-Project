@@ -204,7 +204,8 @@ begin
       using errcode = '42501';
   end if;
 
-  if v_viewer.app_role = 'hr' then
+  -- Admin inherits HR's ability to inspect any line.
+  if v_viewer.app_role in ('hr', 'admin') then
     v_manager := p_manager_id;
     v_dept    := p_department;
   elsif v_viewer.app_role = 'manager' then

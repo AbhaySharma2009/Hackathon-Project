@@ -7,7 +7,7 @@ import { HrDashboardClient } from "@/components/features/dashboard/hr-dashboard-
  * so hiding the page is a convenience rather than the control.
  */
 export default async function HrDashboardPage() {
-  const employee = await redirectUnlessRole("hr", "manager");
+  const employee = await redirectUnlessRole("hr", "admin");
 
   // The role travels down so the page can hide the HR-only Smart HR Query card
   // from a manager. Hiding it is a convenience; POST /api/ai/hr-query rejects a

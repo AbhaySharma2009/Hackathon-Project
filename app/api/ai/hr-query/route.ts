@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { toErrorResponse } from "@/server/api/errors";
 import { parseJson, readJson } from "@/server/api/parse";
-import { requireHr } from "@/server/api/session";
+import { requireHrOrAdmin } from "@/server/api/session";
 import { isLlmConfigured } from "@/server/ai/llm";
 import { HR_QUERY_EXAMPLES, runHrQuery } from "@/server/ai/hr-query";
 import type { ToolContext } from "@/server/ai/tools.employee";
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
   try {
     // Before anything else. An unauthorised caller must not learn whether the
     // assistant is even configured.
-    const session = await requireHr();
+    const session = await requireHrOrAdmin();
 
     const body = parseJson(bodySchema, await readJson(request));
 

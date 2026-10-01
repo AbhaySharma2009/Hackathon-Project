@@ -12,7 +12,7 @@ export type LeaveType = "casual" | "sick" | "annual" | "unpaid";
  * of being auto-approved. Only HR can move it.
  */
 export type LeaveStatus = "pending" | "approved" | "rejected" | "cancelled" | "approval_blocked";
-export type AppRole = "employee" | "manager" | "hr";
+export type AppRole = "employee" | "manager" | "hr" | "admin";
 
 /** Which signature a step represents. Distinct from `app_role`. */
 export type ApprovalStepRole = "manager" | "department_head" | "hr";
@@ -152,6 +152,60 @@ export type LeaveApprovalStep = {
  * a request per row.
  */
 export type MyLeaveRequest = LeaveRequest & { approval_chain: ApprovalStep[] };
+
+/** Shape returned by `admin_activity_log`: live totals plus the AI audit tail. */
+export type AdminActivityLog = {
+  ok: boolean;
+  totals: {
+    by_role: Record<string, number>;
+    open_alerts: number;
+    auth_accounts: number;
+    approvals_open: number;
+    employees_total: number;
+    employees_active: number;
+    requests_pending: number;
+    requests_blocked: number;
+  };
+  ai_audit: {
+    id: string;
+    created_at: string;
+    tool_name: string;
+    success: boolean;
+    error: string | null;
+    duration_ms: number | null;
+    arguments: Record<string, unknown> | null;
+  }[];
+};
+
+/** The singleton row in `approval_policy`. */
+export type ApprovalPolicy = {
+  id: boolean;
+  short_leave_max_days: number;
+  medium_leave_max_days: number;
+  require_hr_over_seven: boolean;
+};
+
+/** The approver list `required_approval_levels` derives from a day's duration. */
+export type RequiredApprovalLevels = {
+  needs_manager: boolean;
+  needs_department_head: boolean;
+  needs_hr: boolean;
+  level_count: number;
+};
+
+/** A person as listed in the admin console. */
+export type AdminUser = {
+  id: string;
+  email: string;
+  name: string;
+  photo: string | null;
+  app_role: AppRole;
+  department: string | null;
+  manager_id: string | null;
+  role: string | null;
+  join_date: string;
+  is_active: boolean;
+};
 
 /** A request joined with the directory fields the inbox needs to render a row. */
 export type ApprovalRequest = LeaveRequest & {
@@ -510,6 +564,10 @@ export type Database = {
       leave_approval_steps: Table<LeaveApprovalStep>;
       alerts: Table<Alert>;
       ai_audit_log: Table<AiAuditLog>;
+      /** Phase 14: the authoritative department list. */
+      departments: Table<{ name: string }>;
+      /** Phase 14: the singleton row holding the approval thresholds. */
+      approval_policy: Table<ApprovalPolicy>;
     };
     Views: Record<string, never>;
     Functions: {
@@ -528,6 +586,56 @@ export type Database = {
       approve_leave_request: {
         Args: { p_request_id: string; p_comment?: string | null };
         Returns: LeaveDecision;
+      };
+      required_approval_levels: {
+        Args: { p_days: number };
+        Returns: RequiredApprovalLevels;
+      };
+      // Phase 14 admin RPCs. Executed as `service_role` after the route handler
+      // has checked the caller's role, so they are absent from the anon surface.
+      admin_list_employees: {
+        Args: { p_actor: string };
+        Returns: AdminUser[];
+      };
+      admin_create_employee: {
+        Args: {
+          p_actor: string;
+          p_employee_id: string;
+          p_email: string;
+          p_full_name: string;
+          p_app_role: AppRole;
+          p_department: string | null;
+          p_manager_id: string | null;
+          p_job_title: string;
+        };
+        Returns: { ok: boolean; id: string; email: string };
+      };
+      admin_update_employee: {
+        Args: {
+          p_actor: string;
+          p_employee_id: string;
+          p_app_role: AppRole | null;
+          p_department: string | null;
+          p_manager_id: string | null;
+          p_job_title: string | null;
+        };
+        Returns: { ok: boolean; id: string };
+      };
+      admin_set_employee_active: {
+        Args: { p_actor: string; p_employee_id: string; p_is_active: boolean };
+        Returns: { ok: boolean; id: string };
+      };
+      admin_activity_log: {
+        Args: { p_actor: string; p_limit: number };
+        Returns: AdminActivityLog;
+      };
+      cancel_leave_request: {
+        Args: { p_request_id: string };
+        Returns: { ok: boolean; id: string; status: string };
+      };
+      can_cancel_leave_request: {
+        Args: { p_request_id: string };
+        Returns: boolean;
       };
       reject_leave_request: {
         Args: { p_request_id: string; p_comment: string };
@@ -624,7 +732,7 @@ export type Database = {
         Args: { p_request_id: string; p_level?: number | null };
         Returns: boolean;
       };
-      required_approval_levels: { Args: { p_days: number }; Returns: number };
+      required_approval_levels_unused_marker: { Args: { p_days: number }; Returns: number };
       get_approval_chain: {
         Args: { p_request_id: string };
         Returns: { ok: boolean; chain: ApprovalChain } | { ok: false; error_code: string; error_message: string };

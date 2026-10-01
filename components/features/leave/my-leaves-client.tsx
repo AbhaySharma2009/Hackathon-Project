@@ -5,6 +5,7 @@ import { CalendarPlus } from "lucide-react";
 import { apiFetch } from "@/shared/api-client";
 import { createClient } from "@/shared/supabase-client";
 import { Button } from "@/components/ui/button";
+import { ToastViewport, useToast } from "@/components/ui/toast";
 import { PageHeader } from "@/components/design/page-header";
 import { EmptyState, ErrorState } from "@/components/design/states";
 import { KpiSkeleton, ListSkeleton } from "@/components/design/loaders";
@@ -25,6 +26,8 @@ export function MyLeavesClient({ employeeId }: { employeeId: string }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const { toasts, toast, dismiss } = useToast();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -88,6 +91,34 @@ export function MyLeavesClient({ employeeId }: { employeeId: string }) {
 
   const refresh = useCallback(() => setNonce((n) => n + 1), []);
 
+  /**
+   * Cancels one of my own pending requests.
+   *
+   * The row is refetched from the server afterwards rather than patched locally,
+   * so what is shown is the authoritative status — the approval chain is retired
+   * and the approvers are notified in the same transaction.
+   */
+  const cancelRequest = async (id: string) => {
+    setCancellingId(id);
+    try {
+      await apiFetch(`/api/leave-requests/${id}/cancel`, { method: "POST" });
+      toast({
+        tone: "success",
+        title: "Request cancelled",
+        description: "Your approvers have been notified. No leave balance changed.",
+      });
+      setNonce((n) => n + 1);
+    } catch (err) {
+      toast({
+        tone: "error",
+        title: "Could not cancel",
+        description: err instanceof Error ? err.message : "Unexpected error.",
+      });
+    } finally {
+      setCancellingId(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -130,7 +161,12 @@ export function MyLeavesClient({ employeeId }: { employeeId: string }) {
               }
             />
           ) : (
-            <LeaveHistory requests={requests} onSelect={setSelectedId} />
+            <LeaveHistory
+              requests={requests}
+              onSelect={setSelectedId}
+              onCancel={cancelRequest}
+              cancellingId={cancellingId}
+            />
           )}
         </>
       )}
@@ -155,6 +191,8 @@ export function MyLeavesClient({ employeeId }: { employeeId: string }) {
           if (!open) setSelectedId(null);
         }}
       />
+
+      <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </div>
   );
 }

@@ -15,18 +15,23 @@ export type NavIcon =
   | "availability"
   | "alerts"
   | "hr"
-  | "query";
+  | "query"
+  | "admin"
+  | "users"
+  | "hierarchy"
+  | "activity";
 
 /**
  * Navigation groups, in the order they appear. A group with no visible items is
  * dropped entirely, so a plain employee never sees an empty "HR" heading.
  */
-export type NavGroup = "workspace" | "management" | "hr";
+export type NavGroup = "workspace" | "management" | "hr" | "admin";
 
 export const NAV_GROUP_LABEL: Record<NavGroup, string> = {
   workspace: "Workspace",
   management: "Management",
   hr: "HR",
+  admin: "Administration",
 };
 
 export type NavItem = {
@@ -38,8 +43,10 @@ export type NavItem = {
   group: NavGroup;
 };
 
-const ALL: AppRole[] = ["employee", "manager", "hr"];
-const LEADERSHIP: AppRole[] = ["manager", "hr"];
+const ALL: AppRole[] = ["employee", "manager", "hr", "admin"];
+const LEADERSHIP: AppRole[] = ["manager", "hr", "admin"];
+const HR_ONLY: AppRole[] = ["hr", "admin"];
+const ADMIN_ONLY: AppRole[] = ["admin"];
 
 /**
  * Sidebar definition. Every item is filtered by `app_role` on the server before
@@ -78,15 +85,43 @@ export const NAV_ITEMS: NavItem[] = [
     group: "management",
   },
   // Managers reach the same dashboard, but the API scopes it to their own team.
-  { href: "/hr-dashboard", label: "HR Dashboard", icon: "hr", roles: LEADERSHIP, group: "hr" },
+  { href: "/hr-dashboard", label: "HR Dashboard", icon: "hr", roles: HR_ONLY, group: "hr" },
   {
     // The query surface is HR-only in the route, in `/api/ai/hr-query` and again
     // inside every `q_*` database function.
     href: "/smart-hr-query",
     label: "Smart HR Query",
     icon: "query",
-    roles: ["hr"],
+    roles: HR_ONLY,
     group: "hr",
+  },
+
+  // ---- administration -------------------------------------------------------
+  // Admin-only. Every one of these routes repeats the role check server-side and
+  // the matching `admin_*` RPC repeats it again in the database, so reaching the
+  // URL by hand gains nothing.
+  { href: "/admin", label: "Admin Console", icon: "admin", roles: ADMIN_ONLY, group: "admin" },
+  { href: "/admin/users", label: "Users & Roles", icon: "users", roles: ADMIN_ONLY, group: "admin" },
+  {
+    href: "/admin/departments",
+    label: "Departments",
+    icon: "directory",
+    roles: ADMIN_ONLY,
+    group: "admin",
+  },
+  {
+    href: "/admin/approval-hierarchy",
+    label: "Approval Hierarchy",
+    icon: "hierarchy",
+    roles: ADMIN_ONLY,
+    group: "admin",
+  },
+  {
+    href: "/admin/activity",
+    label: "Activity & Audit",
+    icon: "activity",
+    roles: ADMIN_ONLY,
+    group: "admin",
   },
 ];
 
@@ -97,8 +132,68 @@ export function navForRole(role: AppRole): NavItem[] {
 /** Items bucketed by group, with empty groups removed. */
 export function groupedNavForRole(role: AppRole): { group: NavGroup; items: NavItem[] }[] {
   const items = navForRole(role);
-  const groups: NavGroup[] = ["workspace", "management", "hr"];
+  const groups: NavGroup[] = ["workspace", "management", "hr", "admin"];
   return groups
     .map((group) => ({ group, items: items.filter((item) => item.group === group) }))
     .filter((entry) => entry.items.length > 0);
+}
+
+/**
+ * Authority ladder, mirrored from `public.role_rank` in the database.
+ *
+ * Used for presentation only — to pick a landing page and to decide which
+ * dashboard a link may point at. Authorisation itself is repeated in the route
+ * handler and again in RLS, so a mismatch here can never grant access.
+ */
+export const ROLE_RANK: Record<AppRole, number> = {
+  employee: 1,
+  manager: 2,
+  hr: 3,
+  admin: 4,
+};
+
+export function hasAtLeast(role: AppRole, minimum: AppRole): boolean {
+  return ROLE_RANK[role] >= ROLE_RANK[minimum];
+}
+
+/** Where a role lands after signing in. */
+export function homeForRole(role: AppRole): string {
+  switch (role) {
+    case "admin":
+      return "/admin";
+    case "hr":
+      return "/hr-dashboard";
+    case "manager":
+    case "employee":
+    default:
+      return "/dashboard";
+  }
+}
+
+/**
+ * Whether `role` is allowed to land on `path`.
+ *
+ * Post-login redirects honour a `?next=` parameter, so without this an employee
+ * could be bounced at an administrator URL. The page itself would refuse them
+ * anyway — this exists so the user is not sent somewhere they cannot go.
+ *
+ * It is a routing nicety, not a security boundary: every admin route repeats the
+ * check server-side and the database repeats it again in RLS.
+ */
+export function canRoleVisit(role: AppRole, path: string): boolean {
+  const landing = homeForRole(role);
+
+  // The landing page and anything under it is always fine.
+  if (path === landing || path.startsWith(`${landing}/`)) return true;
+
+  // Match the longest matching item so `/admin/users` is judged by its own entry
+  // rather than the bare `/admin` console entry.
+  const match = NAV_ITEMS.filter((item) => path === item.href || path.startsWith(`${item.href}/`)).sort(
+    (a, b) => b.href.length - a.href.length,
+  )[0];
+
+  // Unknown paths fall back to the role's own home rather than being trusted.
+  if (!match) return false;
+
+  return match.roles.includes(role);
 }

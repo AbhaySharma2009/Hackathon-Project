@@ -122,10 +122,20 @@ async function main() {
   // ---- 1. all six accounts can sign in -------------------------------------
   const { data: authUsers } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
   const emails = (authUsers?.users ?? []).map((u) => u.email).sort();
-  record(emails.length === 6, "exactly 6 auth accounts exist", `found ${emails.length}: ${emails.join(", ")}`);
-
   const { data: emps } = await admin.from("employees").select("id,name,email,app_role,department,manager_id");
-  record((emps ?? []).length === 6, "exactly 6 employee rows exist", `found ${(emps ?? []).length}`);
+
+  // Counts are derived from the organisation rather than hardcoded, so adding a
+  // person to the demo dataset does not make this file report a false failure.
+  record(
+    emails.length === (emps ?? []).length && (emps ?? []).length > 0,
+    "every employee has exactly one auth account",
+    `${emails.length} accounts for ${(emps ?? []).length} employees`,
+  );
+  record(
+    emails.every((e) => (emps ?? []).some((p) => p.email === e)),
+    "no orphaned auth accounts",
+    emails.filter((e) => !(emps ?? []).some((p) => p.email === e)).join(", "),
+  );
   record(
     (emps ?? []).every((e) => e.app_role !== "hr" || e.email === USERS.hr),
     "exactly one HR account",
@@ -166,8 +176,8 @@ async function main() {
     .from("employees")
     .select("id,name,photo,role,department,manager_id,join_date,is_active");
   record(
-    !granted.error && (granted.data ?? []).length === 6,
-    "employee sees the 6 directory rows via the granted columns",
+    !granted.error && (granted.data ?? []).length === (emps ?? []).length,
+    "employee sees every directory row via the granted columns",
     granted.error ? granted.error.message : `got ${(granted.data ?? []).length}`,
   );
   // Requesting a non-granted column must be refused outright.
@@ -508,10 +518,24 @@ async function main() {
     .eq("status", "approval_blocked")
     .limit(1)
     .maybeSingle();
-  record(!!blocked, "the department head's own request is parked as approval_blocked");
+  // `approval_blocked` is the parking state for a request whose chain cannot be
+  // completed — somebody with no resolvable approver above them. Since Phase 14
+  // gave the demo an administrator at the top, every seeded person now has a
+  // live approver, so the healthy invariant is that nothing is stranded.
   record(
-    !!blocked?.blocked_reason && blocked.blocked_reason.length > 10,
-    "the blocked request carries a human-readable reason",
+    !blocked,
+    "no seeded request is stranded without an approver",
+    `blocked: ${blocked?.blocked_reason ?? "unknown"}`,
+  );
+
+  // Any that *are* blocked must say why, since that is what the user is shown.
+  const { data: anyBlocked } = await admin
+    .from("leave_requests")
+    .select("blocked_reason")
+    .eq("status", "approval_blocked");
+  record(
+    (anyBlocked ?? []).every((r) => !!r.blocked_reason && r.blocked_reason.length > 10),
+    "every blocked request carries a human-readable reason",
   );
 
   // ---- 9. AI endpoints degrade gracefully, never 500 ------------------------

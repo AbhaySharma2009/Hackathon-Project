@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ApiError, toErrorResponse } from "@/server/api/errors";
-import { requireHr, requireSession } from "@/server/api/session";
+import { requireHrOrAdmin, requireSession } from "@/server/api/session";
 import {
   DIRECTORY_COLUMNS,
   employeeCreateSchema,
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
 /** POST /api/employees — HR only. RLS rejects anyone else even if called directly. */
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireHr();
+    const session = await requireHrOrAdmin();
     const body = parseBody(employeeCreateSchema, await readJson(request));
 
     // A brand new employee has no id yet, so the cycle walk only has to check

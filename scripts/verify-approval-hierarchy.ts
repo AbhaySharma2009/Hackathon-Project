@@ -80,8 +80,16 @@ async function runChecks() {
   const hrCookies = await cookieFor(hr.email);
   const deptHeadCookies = await cookieFor(deptHead.email);
 
+  // One session per person, so a chain can be signed by whoever it actually
+  // names rather than by an approver this file assumed in advance.
+  const sessionFor = new Map<string, SupabaseClient>();
+  for (const person of employees ?? []) {
+    sessionFor.set(person.id, await as(person.email));
+  }
+
   const clients: Record<string, SupabaseClient> = {
     hr: await as(hr.email),
+    admin: await as(byEmail.get("meera.krishnan@orgflow.dev")!.email),
     deptHead: await as(deptHead.email),
     manager: await as(manager.email),
     outsider: await as(outsider.email),
@@ -209,7 +217,7 @@ async function runChecks() {
     return { id, chain, result: result.data as Record<string, unknown> | null };
   };
 
-  const pendingSteps = (chain: { status: string; approver_employee_id: string }[]) =>
+  const pendingSteps = (chain: { status: string; approver_employee_id: string; level: number }[]) =>
     chain.filter((s) => s.status === "pending");
 
   // ==========================================================================
@@ -308,28 +316,57 @@ async function runChecks() {
       );
     }
 
-    // and the organisation head can actually sign it
+    // and every level of the chain that was actually built can sign it
+    //
+    // The chain is discovered rather than assumed: adding an administrator above
+    // the chief executive legitimately gives an HR requester a second level, so
+    // "the organisation head signs and it is final" is no longer true in general.
     if (submitted.id) {
-      const step = pendingSteps(submitted.chain)[0];
-      if (step) {
-        const sign = await clients.deptHead.rpc("approve_leave_request", {
+      let lastSigner: string | null = null;
+
+      // Bounded by the chain length: each pass signs exactly one level.
+      for (let pass = 0; pass < submitted.chain.length; pass++) {
+        const step = pendingSteps(submitted.chain)[0];
+        if (!step) break;
+
+        // Self-approval is impossible here: the requester is never a step.
+        const signer = sessionFor.get(step.approver_employee_id);
+        if (!signer) {
+          record(false, `HR ${label} chain has a session for level ${step.level}`);
+          break;
+        }
+
+        const sign = await signer.rpc("approve_leave_request", {
           p_request_id: submitted.id,
-          p_comment: "Approved at organisation level.",
+          p_comment: `Approved at level ${step.level}.`,
         });
-        record(sign.data?.ok === true, `organisation head can sign HR ${label} leave`, JSON.stringify(sign.data));
 
-        const { data: settled } = await admin
-          .from("leave_requests")
-          .select("status,decided_by")
-          .eq("id", submitted.id)
-          .single();
-        record(
-          settled?.status === "approved" && settled.decided_by === deptHead.id,
-          `HR ${label} leave reaches a final approved status`,
-          `${settled?.status} by ${byId.get(settled?.decided_by ?? "")?.name}`,
-        );
+        if (sign.data?.ok !== true) {
+          record(false, `HR ${label} chain level ${step.level} can be signed`, JSON.stringify(sign.data));
+          break;
+        }
+        lastSigner = step.approver_employee_id;
 
+        // Re-read the chain so the next iteration sees the level it advanced to.
+        const { data: refreshed } = await admin
+          .from("leave_approval_steps")
+          .select("status, approver_employee_id, level")
+          .eq("leave_request_id", submitted.id)
+          .order("level");
+        submitted.chain = (refreshed ?? []) as typeof submitted.chain;
       }
+
+      const { data: settled } = await admin
+        .from("leave_requests")
+        .select("status,decided_by")
+        .eq("id", submitted.id)
+        .single();
+
+      record(
+        settled?.status === "approved" && settled.decided_by === lastSigner,
+        `HR ${label} leave reaches a final approved status`,
+        `${settled?.status} by ${byId.get(settled?.decided_by ?? "")?.name}`,
+      );
     }
   }
 

@@ -20,7 +20,7 @@ export async function GET() {
     // The UI hides the page from employees, but the request is rejected here even
     // if it is made directly. The RPC repeats the check, so the database is the
     // enforcement layer rather than this route.
-    const { supabase } = await requireRole("hr", "manager");
+    const { supabase } = await requireRole("hr", "manager", "admin");
 
     const { data, error } = await supabase.rpc("get_dashboard_summary");
 

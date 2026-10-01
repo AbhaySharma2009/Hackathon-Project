@@ -45,7 +45,7 @@ const DEMO_PASSWORD = "OrgFlow@2026";
 const id = (n: number) => `11111111-1111-4111-8111-${String(n).padStart(12, "0")}`;
 const photo = (n: number) => `https://i.pravatar.cc/300?img=${n}`;
 
-type AppRole = "employee" | "manager" | "hr";
+import type { AppRole } from "../shared/types";
 type LeaveType = "casual" | "sick" | "annual" | "unpaid";
 
 type Person = {
@@ -63,6 +63,20 @@ type Person = {
 
 /** Join dates are absolute; leave dates are relative to the current year. */
 const PEOPLE: Person[] = [
+  // Phase 14: the administrator tier sits above HR and reaches the admin console.
+  // Kept at the top of the list so the hierarchy reads admin-first.
+  {
+    key: "admin",
+    id: id(100),
+    name: "Meera Krishnan",
+    email: "meera.krishnan@orgflow.dev",
+    photo: photo(11),
+    role: "Head of People Operations",
+    app_role: "admin",
+    department: "HR & Operations",
+    manager: null,
+    join_date: "2018-01-08",
+  },
   {
     key: "root",
     id: id(101),
@@ -72,7 +86,7 @@ const PEOPLE: Person[] = [
     role: "Chief Executive Officer",
     app_role: "manager",
     department: "Engineering",
-    manager: null,
+    manager: "admin",
     join_date: "2019-03-11",
   },
   {
@@ -141,6 +155,7 @@ const byKey = new Map(PEOPLE.map((p) => [p.key, p]));
 
 /** Allocated leave per person per type, for the current year. */
 const ALLOCATION: Record<string, Record<LeaveType, number>> = {
+  admin: { casual: 12, sick: 10, annual: 22, unpaid: 0 },
   root: { casual: 10, sick: 10, annual: 25, unpaid: 0 },
   mgrEng: { casual: 12, sick: 10, annual: 22, unpaid: 0 },
   mgrSales: { casual: 12, sick: 10, annual: 20, unpaid: 0 },

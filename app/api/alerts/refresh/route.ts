@@ -27,7 +27,7 @@ export async function POST() {
   try {
     // Generating alerts for other people is a privileged action: an employee
     // would learn their manager's or HR's view of the organisation.
-    await requireRole("manager", "hr");
+    await requireRole("manager", "hr", "admin");
 
     const admin = createAdminClient();
 

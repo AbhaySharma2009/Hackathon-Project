@@ -32,4 +32,19 @@ export async function requireRole(...roles: AppRole[]): Promise<Session> {
   return session;
 }
 
+/**
+ * Requires the administrator tier, mirroring `public.is_admin` in the database.
+ *
+ * HR is deliberately *not* included. `requireRole` treats the tiers as an exact
+ * list, so the admin routes name `admin` explicitly rather than relying on a
+ * numeric comparison that could drift.
+ */
+export async function requireAdmin(): Promise<Session> {
+  return requireRole("admin");
+}
+
+/** The administrator tier plus HR, which shares org-wide visibility. */
 export const requireHr = () => requireRole("hr");
+
+/** Admin or HR. Used by the org-wide read endpoints both tiers may call. */
+export const requireHrOrAdmin = () => requireRole("hr", "admin");

@@ -215,8 +215,8 @@ as $$
         select 1
         from viewer v
         where
-          -- HR sees the whole organisation.
-          v.app_role = 'hr'
+          -- HR and Admin see the whole organisation.
+          v.app_role in ('hr', 'admin')
           -- A manager sees their own reports, and themselves.
           or (p.id = v.id or p.manager_id = v.id)
           -- Everyone sees their teammates, and themselves.

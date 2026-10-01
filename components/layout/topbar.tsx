@@ -13,6 +13,7 @@ const ROLE_LABEL: Record<SidebarUser["app_role"], string> = {
   employee: "Employee",
   manager: "Manager",
   hr: "HR",
+  admin: "Admin",
 };
 
 /** Breadcrumb trail for the current route, derived from the same nav definition

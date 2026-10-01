@@ -323,7 +323,8 @@ begin
       using errcode = '42501';
   end if;
 
-  if v_viewer.app_role = 'hr' then
+  -- Admin inherits HR's org-wide read scope.
+  if v_viewer.app_role in ('hr', 'admin') then
     v_org_wide := true;
     select coalesce(array_agg(e.id), '{}'::uuid[])
     into v_scope

@@ -10,13 +10,15 @@ import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/s
 import { OrgFlowMark, OrgFlowWordmark } from "@/components/layout/brand";
 import { NavLinks } from "@/components/layout/nav-links";
 
+import type { AppRole } from "@/shared/types";
+
 /** The subset of the session the shell needs. Plain data, so it crosses the
  *  server/client boundary without pulling `server-only` code with it. */
 export type SidebarUser = {
   name: string;
   role: string;
   department: string;
-  app_role: "employee" | "manager" | "hr";
+  app_role: AppRole;
   photo: string | null;
 };
 
@@ -24,6 +26,7 @@ const ROLE_LABEL: Record<SidebarUser["app_role"], string> = {
   employee: "Employee",
   manager: "Manager",
   hr: "HR",
+  admin: "Admin",
 };
 
 function initials(name: string) {
