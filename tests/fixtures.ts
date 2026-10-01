@@ -13,6 +13,7 @@
 import { config } from "dotenv";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "../server/supabase/admin-core";
+import type { LeaveType } from "../shared/types";
 
 config({ path: ".env.local" });
 config();
@@ -103,7 +104,7 @@ export async function purgeRequestsFor(employeeId: string): Promise<void> {
 /** Puts one leave balance back to an explicit allocation. */
 export async function resetBalance(
   employeeId: string,
-  leaveType: string,
+  leaveType: LeaveType,
   allocated: number,
   used = 0,
 ): Promise<void> {
@@ -121,7 +122,7 @@ export async function resetBalance(
 export async function usedDays(
   admin: SupabaseClient,
   employeeId: string,
-  leaveType: string,
+  leaveType: LeaveType,
 ): Promise<number> {
   const { data, error } = await admin
     .from("leave_balances")
@@ -140,8 +141,8 @@ export async function usedDays(
  * Tests that need to assert against a number read it from here instead of
  * hard-coding it, so the value tracks `scripts/seed-demo-data.ts`.
  */
-export function seededAllocation(email: string, leaveType: string): number {
-  const allocations: Record<string, Record<string, number>> = {
+export function seededAllocation(email: string, leaveType: LeaveType): number {
+  const allocations: Record<string, Record<LeaveType, number>> = {
     [PEOPLE.admin]: { casual: 12, sick: 10, annual: 22, unpaid: 0 },
     [PEOPLE.ceo]: { casual: 10, sick: 10, annual: 25, unpaid: 0 },
     [PEOPLE.engManager]: { casual: 12, sick: 10, annual: 22, unpaid: 0 },

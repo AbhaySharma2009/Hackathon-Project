@@ -27,6 +27,7 @@ const ROLE_LABEL: Record<SidebarUser["app_role"], string> = {
   manager: "Manager",
   hr: "HR",
   admin: "Admin",
+  super_admin: "Super Admin",
 };
 
 function initials(name: string) {

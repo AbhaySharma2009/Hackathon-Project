@@ -19,19 +19,22 @@ export type NavIcon =
   | "admin"
   | "users"
   | "hierarchy"
-  | "activity";
+  | "activity"
+  | "shield"
+  | "settings";
 
 /**
  * Navigation groups, in the order they appear. A group with no visible items is
  * dropped entirely, so a plain employee never sees an empty "HR" heading.
  */
-export type NavGroup = "workspace" | "management" | "hr" | "admin";
+export type NavGroup = "workspace" | "management" | "hr" | "admin" | "super";
 
 export const NAV_GROUP_LABEL: Record<NavGroup, string> = {
   workspace: "Workspace",
   management: "Management",
   hr: "HR",
   admin: "Administration",
+  super: "Super Administration",
 };
 
 export type NavItem = {
@@ -43,10 +46,11 @@ export type NavItem = {
   group: NavGroup;
 };
 
-const ALL: AppRole[] = ["employee", "manager", "hr", "admin"];
-const LEADERSHIP: AppRole[] = ["manager", "hr", "admin"];
-const HR_ONLY: AppRole[] = ["hr", "admin"];
-const ADMIN_ONLY: AppRole[] = ["admin"];
+const ALL: AppRole[] = ["employee", "manager", "hr", "admin", "super_admin"];
+const LEADERSHIP: AppRole[] = ["manager", "hr", "admin", "super_admin"];
+const HR_ONLY: AppRole[] = ["hr", "admin", "super_admin"];
+const ADMIN_ONLY: AppRole[] = ["admin", "super_admin"];
+const SUPER_ONLY: AppRole[] = ["super_admin"];
 
 /**
  * Sidebar definition. Every item is filtered by `app_role` on the server before
@@ -123,6 +127,28 @@ export const NAV_ITEMS: NavItem[] = [
     roles: ADMIN_ONLY,
     group: "admin",
   },
+
+  // ---- super administration --------------------------------------------------
+  // Super-Admin-only. `admin_role_assignable` in the database is what actually
+  // stops an Admin minting a peer, so these links are presentation rather than
+  // the control.
+  {
+    href: "/super-admin",
+    label: "Super Admin Console",
+    icon: "shield",
+    roles: SUPER_ONLY,
+    group: "super",
+  },
+  {
+    href: "/super-admin/access",
+    label: "Access & Escalation",
+    icon: "users",
+    roles: SUPER_ONLY,
+    group: "super",
+  },
+
+  // ---- account ---------------------------------------------------------------
+  { href: "/settings", label: "Settings", icon: "settings", roles: ALL, group: "workspace" },
 ];
 
 export function navForRole(role: AppRole): NavItem[] {
@@ -132,7 +158,7 @@ export function navForRole(role: AppRole): NavItem[] {
 /** Items bucketed by group, with empty groups removed. */
 export function groupedNavForRole(role: AppRole): { group: NavGroup; items: NavItem[] }[] {
   const items = navForRole(role);
-  const groups: NavGroup[] = ["workspace", "management", "hr", "admin"];
+  const groups: NavGroup[] = ["workspace", "management", "hr", "admin", "super"];
   return groups
     .map((group) => ({ group, items: items.filter((item) => item.group === group) }))
     .filter((entry) => entry.items.length > 0);
@@ -150,6 +176,7 @@ export const ROLE_RANK: Record<AppRole, number> = {
   manager: 2,
   hr: 3,
   admin: 4,
+  super_admin: 5,
 };
 
 export function hasAtLeast(role: AppRole, minimum: AppRole): boolean {
@@ -159,6 +186,8 @@ export function hasAtLeast(role: AppRole, minimum: AppRole): boolean {
 /** Where a role lands after signing in. */
 export function homeForRole(role: AppRole): string {
   switch (role) {
+    case "super_admin":
+      return "/super-admin";
     case "admin":
       return "/admin";
     case "hr":

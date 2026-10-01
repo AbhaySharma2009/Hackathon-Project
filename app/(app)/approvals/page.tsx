@@ -6,7 +6,7 @@ export const metadata = { title: "Approvals" };
 export default async function ApprovalsPage() {
   // Server-side role check: reaching this route as an employee redirects, even
   // if the link is crafted by hand. RLS blocks the data either way.
-  await redirectUnlessRole("manager", "hr", "admin");
+  await redirectUnlessRole("manager", "hr", "admin", "super_admin");
 
   return <ApprovalsClient />;
 }

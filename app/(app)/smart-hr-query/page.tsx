@@ -13,7 +13,7 @@ export const metadata = { title: "Smart HR Query" };
  * manager or an employee no matter how the request is made.
  */
 export default async function SmartHrQueryPage() {
-  await redirectUnlessRole("hr", "admin");
+  await redirectUnlessRole("hr", "admin", "super_admin");
 
   return (
     <div className="space-y-6">

@@ -20,7 +20,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { id } = await params;
     if (!UUID_RE.test(id)) throw new ApiError("VALIDATION", "Invalid request id.");
 
-    const { supabase } = await requireRole("manager", "hr", "admin");
+    const { supabase } = await requireRole("manager", "hr", "admin", "super_admin");
     const { comment } = parseJson(approveSchema, await readJson(request));
 
     return decideLeave(supabase, "approve_leave_request", id, comment || null);

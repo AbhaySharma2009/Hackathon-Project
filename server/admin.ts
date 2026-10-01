@@ -4,7 +4,7 @@ import { z } from "zod";
 export const createEmployeeSchema = z.object({
   email: z.string().trim().email("Enter a valid email address."),
   full_name: z.string().trim().min(1, "A name is required."),
-  app_role: z.enum(["employee", "manager", "hr", "admin"]).default("employee"),
+  app_role: z.enum(["employee", "manager", "hr", "admin", "super_admin"]).default("employee"),
   department: z.string().trim().min(1).nullable().default(null),
   manager_id: z.string().uuid().nullable().default(null),
   job_title: z.string().trim().min(1).default("Employee"),
@@ -20,7 +20,7 @@ export type CreateEmployeeInput = z.infer<typeof createEmployeeSchema>;
 
 /** Every field is optional; an absent one means "leave it as it is". */
 export const updateEmployeeSchema = z.object({
-  app_role: z.enum(["employee", "manager", "hr", "admin"]).optional(),
+  app_role: z.enum(["employee", "manager", "hr", "admin", "super_admin"]).optional(),
   department: z.string().trim().min(1).optional(),
   manager_id: z.string().uuid().optional(),
   job_title: z.string().trim().min(1).optional(),

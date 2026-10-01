@@ -27,6 +27,15 @@ import { buildLeavePreview, resolveDatesFromText } from "../server/ai/leave-draf
 import { systemPrompt } from "../server/ai/prompt";
 import { isLlmConfigured } from "../server/ai/llm";
 
+// Load the dedicated test project's credentials before `.env.local`.
+//
+// dotenv never overwrites a variable that is already set, so loading the test
+// file first makes it win, while `.env.local` still supplies anything else the
+// suites read (the LLM keys, for instance). Without this the suites would run
+// against the demo project, whose eight-person dataset is a different
+// organisation from the 15-person seed they assert on — and approving leave in
+// them would spend real demo balances.
+config({ path: ".env.test.local" });
 config({ path: ".env.local" });
 config();
 

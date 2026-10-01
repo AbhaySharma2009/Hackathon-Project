@@ -12,7 +12,7 @@ export type LeaveType = "casual" | "sick" | "annual" | "unpaid";
  * of being auto-approved. Only HR can move it.
  */
 export type LeaveStatus = "pending" | "approved" | "rejected" | "cancelled" | "approval_blocked";
-export type AppRole = "employee" | "manager" | "hr" | "admin";
+export type AppRole = "employee" | "manager" | "hr" | "admin" | "super_admin";
 
 /** Which signature a step represents. Distinct from `app_role`. */
 export type ApprovalStepRole = "manager" | "department_head" | "hr";
@@ -596,6 +596,14 @@ export type Database = {
       admin_list_employees: {
         Args: { p_actor: string };
         Returns: AdminUser[];
+      };
+      admin_role_catalog: {
+        Args: { p_actor: string };
+        Returns: {
+          can_assign_super_admin: boolean;
+          roles: { value: AppRole; rank: number; assignable: boolean; active_count: number }[];
+          fallback_approver_id: string | null;
+        };
       };
       admin_create_employee: {
         Args: {

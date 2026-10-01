@@ -12,6 +12,8 @@ import {
   Network,
   ScrollText,
   Search,
+  Settings,
+  ShieldAlert,
   ShieldCheck,
   Users,
   type LucideIcon,
@@ -35,6 +37,8 @@ const ICONS: Record<NavIcon, LucideIcon> = {
   users: Users,
   hierarchy: GitBranch,
   activity: ScrollText,
+  shield: ShieldAlert,
+  settings: Settings,
 };
 
 export function navIcon(name: NavIcon): LucideIcon {

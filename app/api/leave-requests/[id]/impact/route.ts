@@ -25,7 +25,7 @@ export async function GET(_request: NextRequest, context: Context) {
 
     // The impact of a decision is for the people who make it. An employee is
     // refused here and again inside the RPC.
-    const { supabase } = await requireRole("manager", "hr", "admin");
+    const { supabase } = await requireRole("manager", "hr", "admin", "super_admin");
 
     const { data, error } = await supabase.rpc("get_leave_impact", { p_request_id: id });
 

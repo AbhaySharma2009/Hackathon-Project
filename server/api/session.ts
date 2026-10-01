@@ -38,13 +38,23 @@ export async function requireRole(...roles: AppRole[]): Promise<Session> {
  * HR is deliberately *not* included. `requireRole` treats the tiers as an exact
  * list, so the admin routes name `admin` explicitly rather than relying on a
  * numeric comparison that could drift.
+ *
+ * Super Admin is included: the top tier may do everything an Admin may, plus
+ * the escalation controls an Admin may not. The surfaces that are Super-Admin
+ * *only* use `requireSuperAdmin` instead, so widening this one never accidentally
+ * grants them.
  */
 export async function requireAdmin(): Promise<Session> {
-  return requireRole("admin");
+  return requireRole("admin", "super_admin");
+}
+
+/** The Super Admin tier alone, for /api/super-admin and the console pages. */
+export async function requireSuperAdmin(): Promise<Session> {
+  return requireRole("super_admin");
 }
 
 /** The administrator tier plus HR, which shares org-wide visibility. */
 export const requireHr = () => requireRole("hr");
 
-/** Admin or HR. Used by the org-wide read endpoints both tiers may call. */
-export const requireHrOrAdmin = () => requireRole("hr", "admin");
+/** Admin or HR, or the top tier. Used by the org-wide read endpoints. */
+export const requireHrOrAdmin = () => requireRole("hr", "admin", "super_admin");

@@ -13,7 +13,7 @@ export const metadata = { title: "Alerts" };
  * nor this route widens what anyone sees.
  */
 export default async function AlertsPage() {
-  await redirectUnlessRole("manager", "hr", "admin");
+  await redirectUnlessRole("manager", "hr", "admin", "super_admin");
 
   return (
     <div className="space-y-6">

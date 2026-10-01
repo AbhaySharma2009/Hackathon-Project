@@ -63,6 +63,21 @@ type Person = {
 
 /** Join dates are absolute; leave dates are relative to the current year. */
 const PEOPLE: Person[] = [
+  // Phase 15 adds the top tier above Admin. They sit at the very top of the
+  // reporting line, which is also what makes them the approver for an Admin's
+  // own leave. Kept first so the hierarchy reads top-down.
+  {
+    key: "superAdmin",
+    id: id(99),
+    name: "Ananya Iyer",
+    email: "ananya.iyer@orgflow.dev",
+    photo: photo(10),
+    role: "Chief Operating Officer",
+    app_role: "super_admin",
+    department: "HR & Operations",
+    manager: null,
+    join_date: "2016-02-01",
+  },
   // Phase 14: the administrator tier sits above HR and reaches the admin console.
   // Kept at the top of the list so the hierarchy reads admin-first.
   {
@@ -74,7 +89,7 @@ const PEOPLE: Person[] = [
     role: "Head of People Operations",
     app_role: "admin",
     department: "HR & Operations",
-    manager: null,
+    manager: "superAdmin",
     join_date: "2018-01-08",
   },
   {
@@ -155,6 +170,7 @@ const byKey = new Map(PEOPLE.map((p) => [p.key, p]));
 
 /** Allocated leave per person per type, for the current year. */
 const ALLOCATION: Record<string, Record<LeaveType, number>> = {
+  superAdmin: { casual: 12, sick: 10, annual: 25, unpaid: 0 },
   admin: { casual: 12, sick: 10, annual: 22, unpaid: 0 },
   root: { casual: 10, sick: 10, annual: 25, unpaid: 0 },
   mgrEng: { casual: 12, sick: 10, annual: 22, unpaid: 0 },
@@ -620,6 +636,21 @@ async function main() {
   // read it off the raw result instead of `attempt`, which returns `data`.
   const { count: alertCount } = await admin.from("alerts").select("id", { count: "exact", head: true });
   console.log(`alerts now present: ${alertCount ?? 0}`);
+
+  // ---- who signs the Super Admin's own leave ----
+  // Phase 15 routes a Super Admin's leave to a configured fallback approver, and
+  // with none configured the request is parked as blocked. Leaving the column
+  // null would ship the demo dataset with a stranded request nobody can action,
+  // so name the Managing Director. The Super Admin cannot be their own fallback.
+  await attempt("configure the Super Admin fallback approver", () =>
+    admin
+      .from("approval_policy")
+      .update({
+        super_admin_fallback_employee_id: "11111111-1111-4111-8111-000000000101",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", true),
+  );
 
   console.log(`\nDemo dataset ready. ${PEOPLE.length} people, password ${DEMO_PASSWORD}`);
   for (const p of PEOPLE) {

@@ -8,6 +8,6 @@ import { AdminUsersClient } from "@/components/features/admin/admin-users-client
  * regardless of what the URL says.
  */
 export default async function Page() {
-  await redirectUnlessRole("admin");
+  await redirectUnlessRole("admin", "super_admin");
   return <AdminUsersClient />;
 }

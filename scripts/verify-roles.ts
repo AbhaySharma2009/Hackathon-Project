@@ -28,6 +28,7 @@ const ACCOUNTS: Record<AppRole, string> = {
   manager: "sanjay.kapoor@orgflow.dev",
   hr: "rohan.iyer@orgflow.dev",
   admin: "meera.krishnan@orgflow.dev",
+  super_admin: "ananya.iyer@orgflow.dev",
 };
 
 /** Routes only the administrator tier may reach. */
@@ -143,6 +144,7 @@ async function main() {
   check("a manager's home is /dashboard", homeForRole("manager") === "/dashboard");
   check("HR's home is /hr-dashboard", homeForRole("hr") === "/hr-dashboard");
   check("an admin's home is /admin", homeForRole("admin") === "/admin");
+  check("a super admin's home is /super-admin", homeForRole("super_admin") === "/super-admin");
 
   check("an employee may visit their own dashboard", canRoleVisit("employee", "/dashboard"));
   check(
@@ -159,6 +161,21 @@ async function main() {
     !canRoleVisit("admin", "https://example.com/admin"),
   );
 
+  // Phase 15: the top role sits above Admin and is admitted everywhere Admin is,
+  // plus its own console. An Admin must still be kept out of that console.
+  check("a super admin may visit /super-admin", canRoleVisit("super_admin", "/super-admin"));
+  check("a super admin may visit /admin", canRoleVisit("super_admin", "/admin"));
+  check("a super admin may visit /admin/users", canRoleVisit("super_admin", "/admin/users"));
+  check(
+    "a super admin may still not visit an arbitrary path",
+    !canRoleVisit("super_admin", "/not-a-route"),
+  );
+  check(
+    "an admin may not visit /super-admin",
+    !canRoleVisit("admin", "/super-admin"),
+  );
+  check("HR may not visit /super-admin", !canRoleVisit("hr", "/super-admin"));
+
   for (const role of Object.keys(ACCOUNTS) as AppRole[]) {
     const { cookie } = await signedInSession(ACCOUNTS[role]);
     const reachable = new Set(navForRole(role).map((item) => item.href));
@@ -167,7 +184,9 @@ async function main() {
       // `canRoleVisit` is the rule the action applies; assert the rule, then the
       // behaviour, because the behaviour alone would not say *why*.
       const permitted = reachable.has(target);
-      if (role === "admin") {
+      // Phase 15 puts the Super Admin above Admin with full access to the admin
+      // tier, so both are expected to be admitted here.
+      if (role === "admin" || role === "super_admin") {
         check(`${role} may visit ${target}`, permitted);
         continue;
       }

@@ -43,6 +43,7 @@ const ROLE_OPTIONS: { value: AppRole; label: string }[] = [
   { value: "manager", label: "Manager" },
   { value: "hr", label: "HR" },
   { value: "admin", label: "Admin" },
+  { value: "super_admin", label: "Super Admin" },
 ];
 
 const NO_MANAGER = "__none__";

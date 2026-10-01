@@ -23,7 +23,7 @@ import type { AvailabilityDay } from "@/shared/types";
  */
 export async function GET(request: NextRequest) {
   try {
-    const { supabase, employee } = await requireRole("manager", "hr", "admin");
+    const { supabase, employee } = await requireRole("manager", "hr", "admin", "super_admin");
     const query = parseQuery(availabilityQuerySchema, request.nextUrl.searchParams);
     const { from, to } = resolveRange(query);
 

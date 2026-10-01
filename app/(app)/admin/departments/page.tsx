@@ -8,6 +8,6 @@ import { AdminDepartmentsClient } from "@/components/features/admin/admin-depart
  * regardless of what the URL says.
  */
 export default async function Page() {
-  await redirectUnlessRole("admin");
+  await redirectUnlessRole("admin", "super_admin");
   return <AdminDepartmentsClient />;
 }

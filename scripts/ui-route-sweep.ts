@@ -18,13 +18,14 @@ config();
 const APP_URL = process.env.APP_URL ?? "http://localhost:3000";
 const PASSWORD = process.env.DEMO_PASSWORD ?? "OrgFlow@2026";
 
-type Role = "employee" | "manager" | "hr" | "admin";
+type Role = "employee" | "manager" | "hr" | "admin" | "super_admin";
 
 const ACCOUNTS: Record<Role, string> = {
   employee: "neha.gupta@orgflow.dev",
   manager: "sanjay.kapoor@orgflow.dev",
   hr: "rohan.iyer@orgflow.dev",
   admin: "meera.krishnan@orgflow.dev",
+  super_admin: "ananya.iyer@orgflow.dev",
 };
 
 /** Every page a role might be sent to, permitted or not. */
@@ -44,6 +45,9 @@ const ROUTES = [
   "/admin/departments",
   "/admin/approval-hierarchy",
   "/admin/activity",
+  "/super-admin",
+  "/super-admin/access",
+  "/settings",
 ] as const;
 
 /**
@@ -58,6 +62,7 @@ const EXPECTED: Record<Role, string[]> = {
   manager: navForRole("manager").map((item) => item.href),
   hr: navForRole("hr").map((item) => item.href),
   admin: navForRole("admin").map((item) => item.href),
+  super_admin: navForRole("super_admin").map((item) => item.href),
 };
 
 /** Where each role lands after signing in. Mirrors `homeForRole`. */
@@ -66,6 +71,7 @@ const LANDING: Record<Role, string> = {
   manager: "/dashboard",
   hr: "/hr-dashboard",
   admin: "/admin",
+  super_admin: "/super-admin",
 };
 
 /**

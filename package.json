@@ -18,7 +18,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "verify:cancel": "tsx scripts/verify-cancellation.ts",
-    "verify:roles": "tsx scripts/verify-roles.ts"
+    "verify:roles": "tsx scripts/verify-roles.ts",
+    "db:seed-super-admin": "tsx scripts/seed-super-admin.ts",
+    "verify:super-admin": "tsx scripts/verify-super-admin.ts",
+    "db:setup-test": "tsx scripts/setup-test-db.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

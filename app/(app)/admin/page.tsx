@@ -8,6 +8,6 @@ import { AdminConsoleClient } from "@/components/features/admin/admin-console-cl
  * page, and every `/api/admin/*` route rejects them independently.
  */
 export default async function AdminPage() {
-  await redirectUnlessRole("admin");
+  await redirectUnlessRole("admin", "super_admin");
   return <AdminConsoleClient />;
 }

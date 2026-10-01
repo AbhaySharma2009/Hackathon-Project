@@ -24,7 +24,7 @@ import type { ApprovalStep, ApprovalRequest, LeaveRequest } from "@/shared/types
  */
 export async function GET(request: NextRequest) {
   try {
-    const { supabase, employee } = await requireRole("manager", "hr", "admin");
+    const { supabase, employee } = await requireRole("manager", "hr", "admin", "super_admin");
     const { status } = parseQuery(leaveListSchema, request.nextUrl.searchParams);
 
     const isHr = employee.app_role === "hr";
