@@ -692,7 +692,7 @@ export function OrgChartClient() {
           ) : (
             <div
               ref={chartHostRef}
-              className="h-[680px] w-full"
+              className="h-[clamp(560px,72vh,980px)] w-full"
               // Scrolling or dragging is the viewer taking over, after which the
               // chart stops re-framing itself on resize. Wheel and pointer are
               // unambiguous user gestures; `onUpdate` is not, because react-d3-tree

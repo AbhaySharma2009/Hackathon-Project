@@ -35,20 +35,34 @@ export function fittedZoomFor(width: number): number {
   return DEFAULT_ZOOM;
 }
 
-/** Keeps a zoom inside the same limits the toolbar buttons and `scaleExtent` use. */
+/**
+ * Keeps a zoom inside the same limits the toolbar buttons and `scaleExtent` use. */
 export function clampZoom(zoom: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
 }
 
 /**
- * The viewport that shows a whole tree at once.
+ * The floor for fitting the tree to its container.
  *
- * A fixed zoom cannot do this. The seed hierarchy is six levels deep, so at the
- * desktop zoom only the top three rows landed inside the chart's own height and
- * everyone below was clipped off the bottom with nothing on screen to suggest
- * they existed. Measuring the rendered tree and fitting it to the container
- * keeps the whole org visible on load, and stays correct as the org grows or
- * reshapes instead of going stale against a hard-coded number.
+ * Fitting on height alone is not enough, because a deep hierarchy is far taller
+ * than it is wide: the seed org runs six levels deep, so "show everything" drove
+ * the zoom down to about 0.52 and rendered the department line at roughly 6.5px
+ * — technically all on screen and practically unreadable. Truncating the view is
+ * the better failure, so the fit is never allowed to go below the point where
+ * the smallest text on a card is still legible. Below this the viewer pans
+ * instead, which `MIN_ZOOM` already allows.
+ */
+export const FIT_MIN_ZOOM = 0.72;
+
+/**
+ * The viewport that shows as much of the tree as fits readably.
+ *
+ * A fixed zoom cannot do this. At the desktop zoom the six-level seed hierarchy
+ * put three of eight cards inside the chart's height with nothing on screen to
+ * suggest the rest were below; at the zoom that fits all eight, the text became
+ * too small to read. Measuring the rendered tree and framing it inside the
+ * container keeps the visible slice full-height and centred, and stays correct as
+ * the org grows or reshapes instead of going stale against a hard-coded number.
  *
  * `box` is the tree's natural extent in the chart's own coordinates; `container`
  * is the chart's pixel size. The zoom is clamped to the same limits as
@@ -62,7 +76,10 @@ export function fitViewport(
 ): { zoom: number; x: number; y: number } {
   const usableWidth = Math.max(1, container.width - margin * 2);
   const usableHeight = Math.max(1, container.height - margin * 2);
-  const zoom = clampZoom(Math.min(usableWidth / box.width, usableHeight / box.height));
+  const zoom = Math.min(
+    MAX_ZOOM,
+    Math.max(FIT_MIN_ZOOM, Math.min(usableWidth / box.width, usableHeight / box.height)),
+  );
   return {
     zoom,
     x: container.width / 2 - (box.x + box.width / 2) * zoom,

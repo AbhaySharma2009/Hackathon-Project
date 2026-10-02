@@ -4,6 +4,7 @@ import {
   DEFAULT_ZOOM,
   MAX_ZOOM,
   MIN_ZOOM,
+  FIT_MIN_ZOOM,
   ROOTS_KEY,
   applyCollapse,
   clampZoom,
@@ -212,41 +213,54 @@ describe("expand and collapse", () => {
   });
 });
 
-describe("fitting the whole tree on screen", () => {
+describe("framing the tree on screen", () => {
   const container = { width: 1200, height: 680 };
   // The seed hierarchy's natural extent, as `getBBox()` reports it.
   const tree = { x: -450, y: -88, width: 899, height: 1207 };
 
-  it("shows every node on load instead of clipping the lower rows", () => {
+  it("fills the chart rather than showing three rows and clipping the rest", () => {
     const fit = fitViewport(tree, container);
-    // The old fixed zoom showed 3 of 8 rows; this has to show all of it.
-    expect(fit.zoom * tree.height).toBeLessThanOrEqual(container.height);
-    expect(fit.zoom * tree.width).toBeLessThanOrEqual(container.width);
+    // Phase 17 opened at 0.85, which fit only the top three of eight cards.
     expect(fit.zoom).toBeLessThan(DEFAULT_ZOOM);
+    expect(fit.zoom).toBeGreaterThan(0);
   });
 
-  it("centres the tree in the chart", () => {
+  it("never shrinks card text below legibility to fit the whole tree", () => {
     const fit = fitViewport(tree, container);
-    const treeCentre = tree.x + tree.width / 2;
-    const renderedCentre = fit.x + treeCentre * fit.zoom;
-    expect(renderedCentre).toBeCloseTo(container.width / 2, 6);
-    const treeCentreY = tree.y + tree.height / 2;
-    const renderedCentreY = fit.y + treeCentreY * fit.zoom;
-    expect(renderedCentreY).toBeCloseTo(container.height / 2, 6);
+    // The smallest text on a card is the department line at 12.5px. Fitting all
+    // six levels of this tree on height alone lands near 0.52, which rendered it
+    // at about 6.5px - unreadable, so the fit is floored instead.
+    expect(fit.zoom).toBe(FIT_MIN_ZOOM);
+    expect(12.5 * fit.zoom).toBeGreaterThanOrEqual(9);
+  });
+
+  it("shows more of the tree as the chart gets taller", () => {
+    const short = fitViewport(tree, { width: 1200, height: 560 });
+    const tall = fitViewport(tree, { width: 1200, height: 980 });
+    expect(tall.zoom).toBeGreaterThan(short.zoom);
   });
 
   it("scales a short tree up to fill the chart", () => {
     const small = { x: -100, y: -60, width: 300, height: 200 };
     const fit = fitViewport(small, container);
-    // Height is the binding constraint here.
     expect(fit.zoom).toBeGreaterThan(DEFAULT_ZOOM);
-    expect(fit.zoom * 200).toBeLessThanOrEqual(680);
+    expect(fit.zoom).toBeLessThanOrEqual(MAX_ZOOM);
   });
 
-  it("never zooms below the legibility floor or above the ceiling", () => {
+  it("centres the visible slice of the tree", () => {
+    const fit = fitViewport(tree, container);
+    const treeCentre = tree.x + tree.width / 2;
+    expect(fit.x + treeCentre * fit.zoom).toBeCloseTo(container.width / 2, 6);
+    const treeCentreY = tree.y + tree.height / 2;
+    expect(fit.y + treeCentreY * fit.zoom).toBeCloseTo(container.height / 2, 6);
+  });
+
+  it("stays inside the zoom limits for a tree far too large to fit", () => {
     const huge = { x: 0, y: 0, width: 20000, height: 30000 };
     const fit = fitViewport(huge, container);
-    expect(fit.zoom).toBe(MIN_ZOOM);
+    expect(fit.zoom).toBe(FIT_MIN_ZOOM);
+    expect(FIT_MIN_ZOOM).toBeGreaterThan(MIN_ZOOM);
+    expect(FIT_MIN_ZOOM).toBeLessThanOrEqual(MAX_ZOOM);
     expect(clampZoom(99)).toBe(MAX_ZOOM);
     expect(clampZoom(-99)).toBe(MIN_ZOOM);
   });
