@@ -111,8 +111,15 @@ export function DecisionDialog({
         onOpenChange(open);
       }}
     >
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
+      {/* The popup is `position: fixed` and vertically centred, so once its
+          content is taller than the viewport it overflows equally off the top and
+          the bottom and the page cannot scroll to either end. That is what put the
+          confirm button out of reach on a laptop: the dialog measured 886px tall
+          with no height cap, so its top sat above the fold and "Approve request"
+          rendered below it. Capping the height and making only the middle section
+          scroll keeps the header and the actions on screen at any size. */}
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
+        <DialogHeader className="shrink-0 gap-2 p-4 pb-3 pr-12">
           <DialogTitle className="flex items-center gap-2">
             <span
               className={
@@ -133,7 +140,7 @@ export function DecisionDialog({
         </DialogHeader>
 
         {request ? (
-          <div className="space-y-4">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-1">
             <div className="flex items-center gap-3 rounded-md border bg-muted/40 p-3">
               <Avatar>
                 {request.employee_photo ? (
@@ -187,7 +194,7 @@ export function DecisionDialog({
                 a failed lookup must not stop the manager deciding. */}
             {isApprove ? <LeaveImpactPanel requestId={request.id} /> : null}
 
-            <div className="space-y-2">
+            <div className="space-y-2 pb-1">
               <Label htmlFor="decision-comment">
                 {isApprove ? "Comment (optional)" : "Reason for rejection"}
               </Label>
@@ -220,7 +227,7 @@ export function DecisionDialog({
           </div>
         ) : null}
 
-        <DialogFooter>
+        <DialogFooter className="mx-0 mb-0 shrink-0">
           <Button
             variant="outline"
             onClick={() => onOpenChange(false)}

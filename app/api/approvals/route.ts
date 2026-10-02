@@ -15,9 +15,12 @@ import type { ApprovalStep, ApprovalRequest, LeaveRequest } from "@/shared/types
  * from their whole department even though those people report to somebody else,
  * and stops seeing a request the moment it moves past them.
  *
- * HR keeps org-wide visibility (every request) because that is its job, but the
- * `viewer_can_decide` flag on each row is still computed by the database from the
- * active step — HR acting outside its own step is an override, not a default.
+ * HR keeps org-wide visibility (every request) because that is its job, and
+ * `viewer_can_decide` on each row is decided by the database, not here: it is
+ * `can_decide_leave_step`, the same predicate the decision RPCs enforce, so the
+ * buttons on screen and the permission actually checked on submit are the same
+ * question asked the same way. HR deciding outside its own step is an override,
+ * and the override is offered rather than merely permitted.
  *
  * Scope comes from the session and the rows from RLS; the client never names a
  * team, an employee or a level.
@@ -114,12 +117,9 @@ export async function GET(request: NextRequest) {
       if (!person) return [];
 
       const steps = chains.get(row.id) ?? [];
-      // Only the row's own current level counts as "current", and only the
-      // assigned approver on that level may act. HR's override is deliberately
-      // NOT baked in here: the buttons are shown for the assigned approver, and
-      // HR can still act through the same endpoint, which re-checks in the RPC.
-      const active = steps.find((s) => s.level === row.current_approval_level) ?? null;
-      const viewerIsActive = active?.approver_employee_id === employee.id;
+      // Only the row's own current level counts as "current"; the chain is what
+      // the viewer would be signing against.
+      const activeLevel = row.current_approval_level;
 
       return [
         {
@@ -128,15 +128,46 @@ export async function GET(request: NextRequest) {
           employee_photo: person.photo,
           employee_role: person.role,
           employee_department: person.department,
-          approval_chain: steps.map((s) => ({ ...s, is_current: s.level === row.current_approval_level })),
-          viewer_level: viewerIsActive ? active.level : null,
-          viewer_can_decide: viewerIsActive,
+          approval_chain: steps.map((s) => ({ ...s, is_current: s.level === activeLevel })),
+          viewer_level: null,
+          viewer_can_decide: false,
         },
       ];
     });
 
-    // A blocked request has no active step, so it can never be `viewer_can_decide`
-    // for a manager. HR is the only one who can clear it, and HR sees everything.
+    // ---- who may actually decide -------------------------------------------
+    // Phase 19. The buttons used to be shown only to the approver literally
+    // assigned to the active step. That was narrower than what the database
+    // enforces: `approve_leave_request` also lets HR sign any request as an
+    // override, and HR is the only role that can clear an `approval_blocked`
+    // request, which by definition has no active step and so could never light
+    // up a button for anybody. The result was capability with no affordance.
+    //
+    // The authority is not re-implemented here. `can_decide_leave_step` is the
+    // same database predicate the decision RPCs are governed by, so the UI and
+    // the enforcement cannot drift apart.
+    //
+    // The predicate deliberately says nothing about the request's status, so the
+    // status gate is applied on top: a decided request is history, and offering
+    // "Approve" on one would just produce a VALIDATION error.
+    const decidable = all.filter((row) => row.status === "pending" || row.status === "approval_blocked");
+
+    await Promise.all(
+      decidable.map(async (row) => {
+        const { data, error: decideError } = await supabase.rpc("can_decide_leave_step", {
+          p_request_id: row.id,
+          // A blocked request has no current level. Passing null asks the
+          // predicate "is any of my steps outstanding", which for a blocked
+          // request is only ever true through HR's override.
+          p_level: row.current_approval_level,
+        });
+        if (decideError) throw decideError;
+        if (data !== true) return;
+        row.viewer_can_decide = true;
+        row.viewer_level = row.current_approval_level;
+      }),
+    );
+
     return NextResponse.json({
       data: status ? all.filter((row) => row.status === status) : all,
       meta: { counts: countByStatus(all), viewer: viewerMeta(employee) },
