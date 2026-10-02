@@ -286,17 +286,26 @@
     background: transparent;
   }
 
-  /* Org chart nodes are SVG, so their hover treatment is expressed in CSS rather
-     than Tailwind classes. The card rect is the first `rect` in the group. */
-  .of-org-node > rect {
-    transition:
-      stroke 150ms ease,
-      stroke-width 150ms ease,
-      filter 150ms ease;
+  /* Org chart nodes are SVG, so their treatment is expressed in CSS rather than
+     Tailwind classes. The card is the base rect; `__lift` is the tint drawn on
+     top of it for the selected node and must not pick up a stroke or a shadow. */
+  .of-org-node {
+    /* Matches what the card's canvas text measurement uses, so wrapping and
+       rendering always agree. */
+    font-family: var(--font-geist-sans);
   }
 
-  .of-org-node:hover > rect,
-  .of-org-node:focus-visible > rect {
+  .of-org-node__card {
+    transition:
+      stroke 150ms ease,
+      stroke-width 150ms ease;
+    /* A soft drop shadow lifts the card off the connector behind it. Kept in
+       CSS rather than an SVG <filter> so each node needs no filter definition. */
+    filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.07));
+  }
+
+  .of-org-node:hover .of-org-node__card,
+  .of-org-node:focus-visible .of-org-node__card {
     stroke: var(--primary);
     stroke-width: 2;
   }
@@ -305,9 +314,15 @@
     outline: none;
   }
 
-  .of-org-node:focus-visible > rect {
+  .of-org-node:focus-visible .of-org-node__card {
     stroke: var(--ring);
     stroke-width: 2.5;
+  }
+
+  /* Connectors are drawn behind the cards, so they need a little more presence
+     than the default 1px border hairline to stay visible against the surface. */
+  path.stroke-border {
+    stroke-width: 1.5;
   }
 }
 

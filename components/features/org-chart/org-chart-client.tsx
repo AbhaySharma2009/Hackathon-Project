@@ -10,6 +10,26 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmployeeDetailDrawer } from "@/components/features/directory/employee-detail-drawer";
+import {
+  AVATAR_SIZE,
+  CARD_WIDTH,
+  CONTENT_WIDTH,
+  DEPT_DOT_GAP,
+  DEPT_DOT_R,
+  DEPT_LEADING,
+  DEPT_SIZE,
+  META_SIZE,
+  MAX_CARD_HEIGHT,
+  NAME_LEADING,
+  NAME_SIZE,
+  NAME_WEIGHT,
+  ROLE_LEADING,
+  ROLE_SIZE,
+  ROLE_WEIGHT,
+  TOGGLE_R,
+  TOGGLE_STRIP,
+  measureCard,
+} from "@/components/features/org-chart/card-layout";
 import { PageHeader } from "@/components/design/page-header";
 import { EmptyState, ErrorState } from "@/components/design/states";
 import { LoadingRegion } from "@/components/design/loaders";
@@ -35,6 +55,17 @@ const DEPARTMENT_STYLES: Record<string, { dot: string; text: string }> = {
 };
 
 const FALLBACK_STYLE = { dot: "bg-slate-500", text: "text-slate-600 dark:text-slate-400" };
+
+/**
+ * Zoom limits, shared by the toolbar buttons and the tree's `scaleExtent` so the
+ * two can never disagree. The floor is where card text stops being readable —
+ * below it the viewer pans instead of zooming out.
+ */
+const MIN_ZOOM = 0.45;
+const MAX_ZOOM = 1.8;
+const ZOOM_STEP = 0.15;
+const DEFAULT_ZOOM = 0.85;
+const DEFAULT_TRANSLATE = { x: 400, y: 80 };
 
 /**
  * react-d3-tree's `attributes` is `Record<string, string | number | boolean>`, so
@@ -102,7 +133,14 @@ export function OrgChartClient() {
   const [search, setSearch] = useState("");
   const [department, setDepartment] = useState("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [viewport, setViewport] = useState({ zoom: 0.8, x: 400, y: 80 });
+  // Folded branches, owned here rather than by react-d3-tree's `collapsible`:
+  // its collapse walks the whole subtree but its expand only touches the node
+  // that was clicked, so a reopened branch would come back with every report
+  // underneath it still folded.
+  const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
+  const [viewport, setViewport] = useState({ zoom: DEFAULT_ZOOM, ...DEFAULT_TRANSLATE });
   // Mirrors `viewport` so the zoom handler can compare against the last value it
   // committed without re-creating the callback on every render.
   const viewportRef = useRef(viewport);
@@ -170,8 +208,19 @@ export function OrgChartClient() {
     () =>
       forest
         .map((root) => filterChartTree(root, search))
-        .filter((root): root is ChartNode => root !== null) as RawNodeDatum[],
-    [forest, search],
+        .filter((root): root is ChartNode => root !== null)
+        .map(
+          (node): ChartNode =>
+            // Collapse is applied *after* filtering, and always rebuilt from
+            // `forest`, so reopening a branch restores the whole subtree rather
+            // than just the one node that was clicked. While a search is active
+            // the fold state is ignored, otherwise a match could be hidden
+            // inside a branch the viewer had closed.
+            !search && collapsedIds.has(node.attributes.id)
+              ? { ...node, children: undefined }
+              : node,
+        ) as RawNodeDatum[],
+    [forest, search, collapsedIds],
   );
 
   // The seed has a single root, so render it directly. A second root would be
@@ -218,8 +267,17 @@ export function OrgChartClient() {
     setViewport(next);
   }, []);
 
+  const toggleCollapse = useCallback((id: string) => {
+    setCollapsedIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
   const renderNode = useCallback(
-    ({ nodeDatum, toggleNode }: CustomNodeElementProps) => {
+    ({ nodeDatum }: CustomNodeElementProps) => {
       // Destructuring a missing `attributes` took down the whole page, so the
       // render path is total: a node the chart cannot describe still draws
       // rather than unmounting the tree.
@@ -235,6 +293,22 @@ export function OrgChartClient() {
       // The department control highlights rather than hides, so the reporting
       // context around a highlighted person stays on screen.
       const inDepartment = department === "all" || dept === department;
+      // A folded branch is rendered without its `children`, so their presence cannot
+      // answer this. The direct-report count from the server can, and it is what keeps
+      // the reopen control on the card once the branch has been folded away.
+      const hasChildren = reports > 0 || (nodeDatum.children?.length ?? 0) > 0;
+      const isCollapsed = collapsedIds.has(id);
+      const card = measureCard(nodeDatum.name, role, dept, reports);
+
+      // The toggle straddles the bottom border rather than sitting in a corner,
+      // so it reads as the branch control and is separated from every text row
+      // by the reserved strip the layout adds for it.
+      const cardHeight = card.height + (hasChildren ? TOGGLE_STRIP : 0);
+      const cardTop = -cardHeight / 2;
+      const toggleY = cardTop + card.height + TOGGLE_STRIP / 2;
+      const halfWidth = CARD_WIDTH / 2;
+      const halfContent = CONTENT_WIDTH / 2;
+      const deptTextX = -halfContent + DEPT_DOT_GAP;
 
       return (
         <g
@@ -258,16 +332,17 @@ export function OrgChartClient() {
               SVG and does not accept children, so a shared <defs> is not possible. */}
           <defs>
             <clipPath id={`avatar-${id}`}>
-              <circle cx={0} cy={-34} r={22} />
+              <circle cx={0} cy={card.avatarCenterY} r={AVATAR_SIZE / 2} />
             </clipPath>
           </defs>
 
           <rect
-            x={-92}
-            y={-60}
-            rx={14}
-            width={184}
-            height={122}
+            className="of-org-node__card"
+            x={-halfWidth}
+            y={cardTop}
+            rx={16}
+            width={CARD_WIDTH}
+            height={cardHeight}
             fill="var(--color-card)"
             stroke={isSelected ? "var(--color-primary)" : "var(--color-border)"}
             strokeWidth={isSelected ? 2.5 : 1}
@@ -276,11 +351,12 @@ export function OrgChartClient() {
               rather than merely outlined. */}
           {isSelected ? (
             <rect
-              x={-92}
-              y={-60}
-              rx={14}
-              width={184}
-              height={122}
+              className="of-org-node__lift"
+              x={-halfWidth}
+              y={cardTop}
+              rx={16}
+              width={CARD_WIDTH}
+              height={cardHeight}
               fill="var(--color-primary)"
               opacity={0.08}
             />
@@ -288,21 +364,26 @@ export function OrgChartClient() {
           {photo ? (
             <image
               href={photo}
-              x={-22}
-              y={-56}
-              width={44}
-              height={44}
+              x={-AVATAR_SIZE / 2}
+              y={card.avatarCenterY - AVATAR_SIZE / 2}
+              width={AVATAR_SIZE}
+              height={AVATAR_SIZE}
               clipPath={`url(#avatar-${id})`}
               preserveAspectRatio="xMidYMid slice"
             />
           ) : (
             <>
-              <circle cx={0} cy={-34} r={22} fill="var(--color-muted)" />
+              <circle
+                cx={0}
+                cy={card.avatarCenterY}
+                r={AVATAR_SIZE / 2}
+                fill="var(--color-muted)"
+              />
               <text
                 x={0}
-                y={-28}
+                y={card.avatarCenterY + AVATAR_SIZE * 0.14}
                 textAnchor="middle"
-                fontSize={15}
+                fontSize={16}
                 fontWeight={600}
                 fill="var(--color-muted-foreground)"
               >
@@ -310,68 +391,121 @@ export function OrgChartClient() {
               </text>
             </>
           )}
+
           <text
             x={0}
-            y={2}
+            y={card.nameBaseline}
             textAnchor="middle"
-            fontSize={14}
-            fontWeight={600}
+            fontSize={NAME_SIZE}
+            fontWeight={NAME_WEIGHT}
             fill="var(--color-foreground)"
           >
-            {nodeDatum.name.length > 20 ? `${nodeDatum.name.slice(0, 19)}…` : nodeDatum.name}
+            {card.nameLines.map((line, index) => (
+              <tspan key={index} x={0} dy={index === 0 ? 0 : NAME_SIZE * NAME_LEADING}>
+                {line}
+              </tspan>
+            ))}
           </text>
+
           <text
             x={0}
-            y={19}
+            y={card.roleBaseline}
             textAnchor="middle"
-            fontSize={11.5}
+            fontSize={ROLE_SIZE}
+            fontWeight={ROLE_WEIGHT}
             fill="var(--color-muted-foreground)"
           >
-            {role.length > 26 ? `${role.slice(0, 25)}…` : role}
+            {card.roleLines.map((line, index) => (
+              <tspan key={index} x={0} dy={index === 0 ? 0 : ROLE_SIZE * ROLE_LEADING}>
+                {line}
+              </tspan>
+            ))}
           </text>
-          <circle cx={-54} cy={36} r={4} className={style.dot} />
-          <text x={-46} y={40} textAnchor="start" fontSize={11.5} fill="var(--color-muted-foreground)">
-            {dept}
+
+          {/* Separates the department footer from the person's own details. */}
+          <line
+            x1={-halfContent}
+            y1={card.dividerY}
+            x2={halfContent}
+            y2={card.dividerY}
+            stroke="var(--color-border)"
+            strokeWidth={1}
+            opacity={0.7}
+          />
+
+          <circle
+            cx={-halfContent + DEPT_DOT_R}
+            cy={card.deptBaseline - DEPT_SIZE * 0.32}
+            r={DEPT_DOT_R}
+            className={style.dot}
+          />
+          <text
+            x={deptTextX}
+            y={card.deptBaseline}
+            textAnchor="start"
+            fontSize={DEPT_SIZE}
+            fill="var(--color-muted-foreground)"
+          >
+            {card.deptLines.map((line, index) => (
+              <tspan key={index} x={deptTextX} dy={index === 0 ? 0 : DEPT_SIZE * DEPT_LEADING}>
+                {line}
+              </tspan>
+            ))}
           </text>
-          {reports > 0 ? (
+          {card.reports ? (
             <text
-              x={54}
-              y={40}
+              x={halfContent}
+              y={card.deptBaseline}
               textAnchor="end"
-              fontSize={11.5}
+              fontSize={META_SIZE}
               fontWeight={600}
               fill="var(--color-muted-foreground)"
             >
-              {reports} report{reports === 1 ? "" : "s"}
+              {card.reports}
             </text>
           ) : null}
+
           {/* Collapsing is its own control, so clicking the card can open the
               employee drawer without two actions fighting over one area. */}
-          {(nodeDatum.children?.length ?? 0) > 0 ? (
+          {hasChildren ? (
             <g
               className="cursor-pointer"
+              role="button"
+              tabIndex={-1}
+              aria-label={
+                isCollapsed
+                  ? `Expand ${nodeDatum.name}'s reports`
+                  : `Collapse ${nodeDatum.name}'s reports`
+              }
               onClick={(event) => {
                 event.stopPropagation();
-                toggleNode();
+                toggleCollapse(id);
               }}
             >
-              <circle cx={74} cy={-60} r={11} fill="var(--color-muted)" />
+              <circle
+                cx={0}
+                cy={toggleY}
+                r={TOGGLE_R}
+                fill="var(--color-card)"
+                stroke="var(--color-border)"
+                strokeWidth={1.5}
+              />
               <text
-                x={74}
-                y={-56}
+                x={0}
+                y={toggleY + TOGGLE_R * 0.36}
                 textAnchor="middle"
                 fontSize={13}
                 fontWeight={700}
                 fill="var(--color-muted-foreground)"
               >
-                {nodeDatum.__rd3t.collapsed ? "+" : "–"}
+                {isCollapsed ? "+" : "–"}
               </text>
             </g>
           ) : null}
         </g>
       );
     },
-    [selectedId, department],
+    [selectedId, department, collapsedIds, toggleCollapse],
   );
 
   // The tree silently drops a cyclic branch to stay finite, so the server
@@ -425,7 +559,7 @@ export function OrgChartClient() {
             // ref stale and the next `onUpdate` would look like a real change.
             onClick={() => {
               const v = viewportRef.current;
-              updateViewport(Math.min(1.6, v.zoom + 0.15), v.x, v.y);
+              updateViewport(Math.min(MAX_ZOOM, v.zoom + ZOOM_STEP), v.x, v.y);
             }}
             aria-label="Zoom in"
           >
@@ -436,7 +570,9 @@ export function OrgChartClient() {
             size="icon"
             onClick={() => {
               const v = viewportRef.current;
-              updateViewport(Math.max(0.3, v.zoom - 0.15), v.x, v.y);
+              // The floor keeps card text legible: below roughly 0.45 the name stops being
+              // readable, so zooming out stops there and the user pans instead.
+              updateViewport(Math.max(MIN_ZOOM, v.zoom - ZOOM_STEP), v.x, v.y);
             }}
             aria-label="Zoom out"
           >
@@ -445,7 +581,7 @@ export function OrgChartClient() {
           <Button
             variant="outline"
             size="icon"
-            onClick={() => updateViewport(0.8, 400, 80)}
+            onClick={() => updateViewport(DEFAULT_ZOOM, DEFAULT_TRANSLATE.x, DEFAULT_TRANSLATE.y)}
             aria-label="Reset the view"
           >
             <Maximize2 className="size-4" aria-hidden />
@@ -484,18 +620,18 @@ export function OrgChartClient() {
       <Card className="overflow-hidden">
         <CardContent className="p-0">
           {loading ? (
-            <div className="flex h-[640px] flex-col items-center justify-center gap-4" aria-hidden>
+            <div className="flex h-[680px] flex-col items-center justify-center gap-4" aria-hidden>
               <LoadingRegion label="Loading the org chart" />
               <div className="flex flex-col items-center gap-3">
-                <Skeleton className="size-11 rounded-full" />
-                <Skeleton className="h-3 w-40" />
-                <Skeleton className="h-3 w-24" />
+                <Skeleton className="size-12 rounded-full" />
+                <Skeleton className="h-4 w-44" />
+                <Skeleton className="h-3 w-28" />
               </div>
               <div className="mt-6 grid grid-cols-3 gap-8 opacity-60">
                 {[0, 1, 2].map((column) => (
                   <div key={column} className="flex flex-col items-center gap-8">
-                    <Skeleton className="h-24 w-44 rounded-xl" />
-                    <Skeleton className="h-20 w-40 rounded-xl" />
+                    <Skeleton className="h-44 w-62 rounded-2xl" />
+                    <Skeleton className="h-44 w-62 rounded-2xl" />
                   </div>
                 ))}
               </div>
@@ -503,7 +639,7 @@ export function OrgChartClient() {
           ) : forest.length === 0 ? (
             // The error, or the empty org, is already explained above. Mounting
             // the chart here would only draw a placeholder card.
-            <div className="flex h-[640px] items-center justify-center px-6">
+            <div className="flex h-[680px] items-center justify-center px-6">
               <EmptyState
                 className="border-0"
                 icon={Users}
@@ -512,7 +648,7 @@ export function OrgChartClient() {
               />
             </div>
           ) : (
-            <div className="h-[640px] w-full">
+            <div className="h-[680px] w-full">
               <Tree
                 data={treeData}
                 orientation="vertical"
@@ -525,10 +661,22 @@ export function OrgChartClient() {
                 hasInteractiveNodes
                 zoomable
                 draggable
-                collapsible
-                initialDepth={-1}
-                depthFactor={160}
-                nodeSize={{ x: 200, y: 140 }}
+                // Folding is handled above (see `collapsedIds`), so react-d3-tree's
+                // own `collapsible` is left off.
+                //
+                // `scaleExtent` is not optional in effect: react-d3-tree defaults
+                // it to { min: 0.1, max: 1 }, which silently clamped every zoom to
+                // 1 — the zoom-in button did nothing after one click and wheel zoom
+                // could not go further either. These bounds match the toolbar's own
+                // limits, so the floor stays high enough for card text to be read.
+                scaleExtent={{ min: MIN_ZOOM, max: MAX_ZOOM }}
+                // `initialDepth` is deliberately not set. react-d3-tree collapses a
+                // node when `depth >= initialDepth`, so the `-1` this used to pass
+                // marked *every* node collapsed and pruned the whole tree at the
+                // root — the chart rendered one card and no connectors. Left
+                // undefined, nodes default to expanded.
+                depthFactor={MAX_CARD_HEIGHT + 26}
+                nodeSize={{ x: CARD_WIDTH + 48, y: MAX_CARD_HEIGHT + 26 }}
                 separation={{ siblings: 1.1, nonSiblings: 1.4 }}
                 pathClassFunc={() => "stroke-border"}
               />
