@@ -31,6 +31,12 @@ export type Employee = {
   join_date: string;
   is_active: boolean;
   created_at: string;
+  /** Phase 16: self-editable contact details. */
+  phone?: string | null;
+  personal_email?: string | null;
+  address?: string | null;
+  emergency_contact_name?: string | null;
+  emergency_contact_phone?: string | null;
 };
 
 export type LeaveRequest = {
@@ -628,6 +634,58 @@ export type Database = {
           p_job_title: string | null;
         };
         Returns: { ok: boolean; id: string };
+      };
+      /** Phase 16 — self-service. Only these six columns can be written. */
+      update_my_profile: {
+        Args: {
+          p_name?: string | null;
+          p_phone?: string | null;
+          p_personal_email?: string | null;
+          p_address?: string | null;
+          p_emergency_contact_name?: string | null;
+          p_emergency_contact_phone?: string | null;
+        };
+        Returns: {
+          ok: boolean;
+          employee: {
+            id: string;
+            name: string;
+            email: string;
+            photo: string | null;
+            phone: string | null;
+            personal_email: string | null;
+            address: string | null;
+            emergency_contact_name: string | null;
+            emergency_contact_phone: string | null;
+          };
+          before: { name: string };
+        };
+      };
+      /** Phase 16 — avatar URL lives on the row; the file lives in Storage. */
+      update_employee_photo: {
+        Args: { p_actor: string; p_employee_id: string; p_photo: string | null };
+        Returns: { ok: boolean; employee_id: string; photo: string | null };
+      };
+      /** Phase 16 — HR / Admin / Super Admin editing someone else's profile. */
+      admin_update_employee_profile: {
+        Args: {
+          p_actor: string;
+          p_employee_id: string;
+          p_name?: string | null;
+          p_email?: string | null;
+          p_phone?: string | null;
+          p_personal_email?: string | null;
+          p_address?: string | null;
+          p_emergency_contact_name?: string | null;
+          p_emergency_contact_phone?: string | null;
+          p_photo?: string | null;
+          p_app_role?: AppRole | null;
+          p_department?: string | null;
+          p_manager_id?: string | null;
+          p_job_title?: string | null;
+          p_join_date?: string | null;
+        };
+        Returns: { ok: boolean; employee_id: string; app_role: AppRole };
       };
       admin_set_employee_active: {
         Args: { p_actor: string; p_employee_id: string; p_is_active: boolean };

@@ -148,7 +148,7 @@ export const NAV_ITEMS: NavItem[] = [
   },
 
   // ---- account ---------------------------------------------------------------
-  { href: "/settings", label: "Settings", icon: "settings", roles: ALL, group: "workspace" },
+  { href: "/settings", label: "Profile", icon: "settings", roles: ALL, group: "workspace" },
 ];
 
 export function navForRole(role: AppRole): NavItem[] {

@@ -80,16 +80,28 @@ export async function GET(_request: NextRequest, context: Context) {
   }
 }
 
-/** PATCH /api/employees/[id] — HR only, including reassigning the manager. */
+/**
+ * PATCH /api/employees/[id] — HR / Admin / Super Admin editing a profile.
+ *
+ * The write goes through `admin_update_employee_profile`, never a direct table
+ * update. That function is the only place allowed to touch organisation fields,
+ * and it is where the authority checks live: HR cannot edit anyone at or above
+ * their own tier, and nobody can change their own role, department or manager.
+ *
+ * This used to call `session.supabase.from("employees").update(patch)`, which
+ * depended on the `employees_update_hr` policy — an unrestricted UPDATE for any
+ * HR session, on any row, including their own. Phase 16 revoked that policy.
+ */
 export async function PATCH(request: NextRequest, context: Context) {
   try {
     const { id } = await context.params;
     if (!UUID_RE.test(id)) throw new ApiError("VALIDATION", "Invalid employee id.");
 
     const session = await requireHrOrAdmin();
+    const { supabase, employee: actor } = session;
     const body = parseBody(employeeUpdateSchema, await readJson(request));
 
-    const { data: existing } = await session.supabase
+    const { data: existing } = await supabase
       .from("employees")
       .select(DIRECTORY_COLUMNS)
       .eq("id", id)
@@ -101,22 +113,35 @@ export async function PATCH(request: NextRequest, context: Context) {
       await assertNoManagerCycle(session, id, body.manager_id);
     }
 
-    const patch: Record<string, unknown> = { ...body };
-    if (body.photo === "") patch.photo = null;
+    // Only pass the fields the caller actually sent, so an absent key leaves the
+    // stored value alone rather than clearing it.
+    const { error } = await supabase.rpc("admin_update_employee_profile", {
+      p_actor: actor.id,
+      p_employee_id: id,
+      p_name: body.name ?? null,
+      p_email: body.email ?? null,
+      p_photo: body.photo === "" ? null : (body.photo ?? null),
+      p_department: body.department ?? null,
+      p_manager_id: body.manager_id ?? null,
+      p_job_title: body.role ?? null,
+      p_join_date: body.join_date ?? null,
+    });
 
-    // A duplicate email is reported by the unique index. It cannot be pre-checked
-    // here because a session has no SELECT privilege on employees.email.
-    const { error } = await session.supabase.from("employees").update(patch).eq("id", id);
     if (error) {
       if (error.code === "23505") {
         throw new ApiError("VALIDATION", "That email address is already in use.", {
           field: "email",
         });
       }
+      // The RPC speaks in "FORBIDDEN: ..." / "VALIDATION: ..." prefixes; surface
+      // them as the right status rather than flattening everything to 400.
+      const [kind, ...rest] = error.message.split(": ");
+      if (kind === "FORBIDDEN") throw new ApiError("FORBIDDEN", rest.join(": "));
+      if (kind === "NOT_FOUND") throw new ApiError("NOT_FOUND", rest.join(": "));
       throw new ApiError("VALIDATION", error.message);
     }
 
-    const { data: detail } = await session.supabase.rpc("get_employee_detail", {
+    const { data: detail } = await supabase.rpc("get_employee_detail", {
       p_employee_id: id,
     });
 
