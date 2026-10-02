@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
       ? await supabase
           .from("leave_approval_steps")
           .select(
-            "id, leave_request_id, level, approver_employee_id, approver_role, status, comment, decided_at, created_at",
+            "id, leave_request_id, level, approver_employee_id, approver_role, status, comment, decided_at, created_at, approver:employees(name)",
           )
           .in("leave_request_id", ids)
           .order("level")
@@ -59,23 +59,16 @@ export async function GET(request: NextRequest) {
 
     if (stepError) throw stepError;
 
-    const { data: approvers, error: approverError } = await supabase
-      .from("employees")
-      .select("id, name")
-      .in(
-        "id",
-        [...new Set((stepRows ?? []).map((step) => step.approver_employee_id))].filter(Boolean),
-      );
-
-    if (approverError) throw approverError;
-    const nameOf = new Map((approvers ?? []).map((person) => [person.id, person.name]));
-
+    // The approver's display name is joined into the query above rather than
+    // collected by a second lookup keyed on the ids found here. `approver` is
+    // absent when RLS hides the row, so the fallback is unchanged.
     const chainByRequest = new Map<string, ApprovalStep[]>();
     for (const step of stepRows ?? []) {
       const list = chainByRequest.get(step.leave_request_id) ?? [];
+      const approver = step.approver as { name?: string } | null;
       list.push({
         ...step,
-        approver_name: nameOf.get(step.approver_employee_id) ?? "Unknown",
+        approver_name: approver?.name ?? "Unknown",
         is_current: false,
       });
       chainByRequest.set(step.leave_request_id, list);

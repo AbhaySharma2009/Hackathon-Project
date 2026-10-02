@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { ApiError, toErrorResponse } from "@/server/api/errors";
 import { parseQuery } from "@/server/api/parse";
 import { requireRole } from "@/server/api/session";
-import { leaveListSchema } from "@/server/leave";
+import { leaveListSchema, decisionProbeLevel, isUndecided } from "@/server/leave";
 import { DIRECTORY_COLUMNS } from "@/server/employees";
 import type { ApprovalStep, ApprovalRequest, LeaveRequest } from "@/shared/types";
 
@@ -36,33 +36,36 @@ export async function GET(request: NextRequest) {
     // A manager's scope is their reporting line; HR's is the whole directory.
     // Either way the caller is excluded: you never decide your own leave, and the
     // RPC would refuse it regardless.
-    const { data: scope, error: scopeError } = isHr
-      ? await supabase.from("employees").select(DIRECTORY_COLUMNS).eq("is_active", true)
-      : await supabase
-          .from("employees")
-          .select(DIRECTORY_COLUMNS)
-          .eq("manager_id", employee.id)
-          .eq("is_active", true);
+    //
+    // A manager can also hold a department-head step for people who do not report
+    // to them, so their reachable set is the union of both sets rather than just
+    // the direct reports. The two are independent reads, so they are issued
+    // together: they were sequential, and each costs a round trip.
+    const [scope, deptScope] = await Promise.all([
+      isHr
+        ? supabase.from("employees").select(DIRECTORY_COLUMNS).eq("is_active", true)
+        : supabase
+            .from("employees")
+            .select(DIRECTORY_COLUMNS)
+            .eq("manager_id", employee.id)
+            .eq("is_active", true),
+      supabase
+        .from("employees")
+        .select("id, department")
+        .eq("department", employee.department)
+        .eq("is_active", true)
+        .neq("id", employee.id),
+    ]);
 
-    if (scopeError) throw scopeError;
-    if (!scope) throw new ApiError("NOT_FOUND", "Could not resolve the team scope.");
+    if (scope.error) throw scope.error;
+    if (!scope.data) throw new ApiError("NOT_FOUND", "Could not resolve the team scope.");
+    if (deptScope.error) throw deptScope.error;
 
     const people = new Map(
-      scope.filter((person) => person.id !== employee.id).map((person) => [person.id, person]),
+      scope.data.filter((person) => person.id !== employee.id).map((person) => [person.id, person]),
     );
 
-    // A manager can also hold a department-head step for people who do not report
-    // to them, so their reachable set is the union of both, not just the direct
-    // reports above.
-    const { data: deptScope, error: deptError } = await supabase
-      .from("employees")
-      .select("id, department")
-      .eq("department", employee.department)
-      .eq("is_active", true)
-      .neq("id", employee.id);
-
-    if (deptError) throw deptError;
-    for (const person of deptScope ?? []) {
+    for (const person of deptScope.data ?? []) {
       if (!people.has(person.id)) people.set(person.id, { id: person.id, department: person.department } as never);
     }
 
@@ -85,30 +88,29 @@ export async function GET(request: NextRequest) {
 
     // ---- the chains, in one round trip --------------------------------------
     // Fetched for the whole candidate set rather than per request: the inbox is
-    // one team's requests, so this stays a single cheap query instead of N.
+    // one team's requests, so this stays a single cheap query instead of N. The
+    // approver's display name is embedded in that same query rather than being
+    // collected afterwards by a second lookup keyed on the ids found here.
     const requestIds = (rows ?? []).map((r) => r.id);
     const { data: stepRows, error: stepError } = requestIds.length
       ? await supabase
           .from("leave_approval_steps")
-          .select("id, leave_request_id, level, approver_employee_id, approver_role, status, comment, decided_at, created_at")
+          .select(
+            "id, leave_request_id, level, approver_employee_id, approver_role, status, comment, decided_at, created_at, approver:employees(name)",
+          )
           .in("leave_request_id", requestIds)
           .order("level")
       : { data: [], error: null };
 
     if (stepError) throw stepError;
 
-    const { data: approverNames, error: nameError } = await supabase
-      .from("employees")
-      .select("id, name")
-      .in("id", [...new Set((stepRows ?? []).map((s) => s.approver_employee_id))].filter(Boolean));
-
-    if (nameError) throw nameError;
-    const nameOf = new Map((approverNames ?? []).map((p) => [p.id, p.name]));
-
     const chains = new Map<string, ApprovalStep[]>();
     for (const step of stepRows ?? []) {
       const list = chains.get(step.leave_request_id) ?? [];
-      list.push({ ...step, approver_name: nameOf.get(step.approver_employee_id) ?? "Unknown", is_current: false });
+      // `approver` is absent when the row is hidden by RLS (an inactive approver,
+      // say), so the fallback is the same one the separate lookup used.
+      const approver = step.approver as { name?: string } | null;
+      list.push({ ...step, approver_name: approver?.name ?? "Unknown", is_current: false });
       chains.set(step.leave_request_id, list);
     }
 
@@ -150,23 +152,35 @@ export async function GET(request: NextRequest) {
     // The predicate deliberately says nothing about the request's status, so the
     // status gate is applied on top: a decided request is history, and offering
     // "Approve" on one would just produce a VALIDATION error.
-    const decidable = all.filter((row) => row.status === "pending" || row.status === "approval_blocked");
+    const decidable = all.filter((row) => isUndecided(row.status));
 
-    await Promise.all(
-      decidable.map(async (row) => {
-        const { data, error: decideError } = await supabase.rpc("can_decide_leave_step", {
-          p_request_id: row.id,
-          // A blocked request has no current level. Passing null asks the
-          // predicate "is any of my steps outstanding", which for a blocked
-          // request is only ever true through HR's override.
-          p_level: row.current_approval_level,
-        });
-        if (decideError) throw decideError;
-        if (data !== true) return;
+    // `can_decide_leave_steps` is the same predicate applied to a whole inbox in
+    // one call. It is a thin wrapper that calls `can_decide_leave_step` per row,
+    // so the rule is still defined once, in the database; this only stops the
+    // route paying a network round trip per candidate row.
+    const probes = decidable.flatMap((row) => {
+      // A parked request has no current level, and the level argument is not a
+      // neutral way to ask about one: null drops the constraint inside the
+      // predicate. `decisionProbeLevel` encodes how each status has to be asked so
+      // the answer cannot exceed what `approve_leave_request` will then allow.
+      const pLevel = decisionProbeLevel(row);
+      if (pLevel === undefined) return [];
+      return [{ id: row.id, lvl: pLevel }];
+    });
+
+    if (probes.length > 0) {
+      const { data, error: decideError } = await supabase.rpc("can_decide_leave_steps", {
+        p_targets: probes,
+      });
+      if (decideError) throw decideError;
+
+      const decided = new Set((data ?? []).map((row) => (row as { request_id: string }).request_id));
+      for (const row of decidable) {
+        if (!decided.has(row.id)) continue;
         row.viewer_can_decide = true;
         row.viewer_level = row.current_approval_level;
-      }),
-    );
+      }
+    }
 
     return NextResponse.json({
       data: status ? all.filter((row) => row.status === status) : all,

@@ -23,6 +23,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { apiFetch } from "@/shared/api-client";
+import { loadAlertsFeed } from "@/shared/alerts-feed";
 import { createClient } from "@/shared/supabase-client";
 import type { AlertSeverity, AlertsFeed, AppRole } from "@/shared/types";
 import { Button } from "@/components/ui/button";
@@ -60,18 +61,19 @@ export function AlertBell({ appRole }: { appRole: AppRole }) {
 
   const canGenerate = appRole === "manager" || appRole === "hr";
 
-  const load = useCallback(async (signal?: AbortSignal) => {
-    const response = await apiFetch<{ data: AlertsFeed }>("/api/alerts", { signal });
-    setFeed(response.data);
+  // Mount reads through the shared loader, which collapses the bell's request
+  // with anything else asking for the feed at the same moment — on the alerts
+  // page the list mounts too. Anything that has changed the alerts forces a
+  // fresh read instead.
+  const load = useCallback(async (options: { force?: boolean } = {}) => {
+    setFeed(await loadAlertsFeed(options));
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    load(controller.signal).catch(() => {
+    load().catch(() => {
       /* the bell is advisory: a failure leaves the counter at zero, not an error */
     });
-    return () => controller.abort();
   }, [load]);
 
   // A decision or a new absence changes what deserves an alert, so the bell
@@ -85,7 +87,7 @@ export function AlertBell({ appRole }: { appRole: AppRole }) {
       .subscribe();
 
     function refresh() {
-      load().catch(() => {});
+      load({ force: true }).catch(() => {});
     }
 
     return () => {
@@ -113,7 +115,7 @@ export function AlertBell({ appRole }: { appRole: AppRole }) {
         body: JSON.stringify({ is_read: isRead }),
       });
     } catch {
-      load().catch(() => {});
+      load({ force: true }).catch(() => {});
     }
   }
 
@@ -121,7 +123,7 @@ export function AlertBell({ appRole }: { appRole: AppRole }) {
     setRefreshing(true);
     try {
       await apiFetch("/api/alerts/refresh", { method: "POST" });
-      await load();
+      await load({ force: true });
     } finally {
       setRefreshing(false);
     }

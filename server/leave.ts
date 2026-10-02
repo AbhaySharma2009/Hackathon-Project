@@ -70,6 +70,54 @@ export type RejectInput = z.infer<typeof rejectSchema>;
 export const INBOX_TABS = ["pending", "approved", "rejected"] as const;
 export type InboxTab = (typeof INBOX_TABS)[number];
 
+/**
+ * `leave_approval_steps.level` is `check (level > 0)`, so this can never name a real
+ * approval step. Asking the database about a level that does not exist is how the
+ * approvals inbox asks a question with exactly one possible answer.
+ */
+export const NO_APPROVAL_STEP_LEVEL = 0;
+
+/**
+ * Can this request be decided at all?
+ *
+ * `can_decide_leave_step` deliberately says nothing about a request's status, so the
+ * status gate lives here: a decided request is history, and offering "Approve" on one
+ * only produces a VALIDATION error.
+ */
+export function isUndecided(status: string): boolean {
+  return status === "pending" || status === "approval_blocked";
+}
+
+/**
+ * The `p_level` to ask `can_decide_leave_step` with, or `undefined` when the question
+ * has no answer and nobody may be offered a decision.
+ *
+ * The predicate is written as `... and (p_level is null or s.level = p_level)`, so a
+ * null argument does NOT mean "this request's current level" — it drops the level
+ * constraint altogether, and the predicate then matches any pending step the viewer
+ * holds anywhere on that request's chain. Verified against a live caller session:
+ * `p_level` of 1 returns true, a level with no step returns false, and null returns
+ * true again for the same viewer on the same request.
+ *
+ * That matters because `build_approval_chain` parks an unrouteable request with
+ * `current_approval_level = NULL` while still writing the department head's step as
+ * `pending`. Passing that null straight through let a department head match a parked
+ * request they can never sign: `approve_leave_request` answers a parked request with
+ * "only HR can decide it", so the inbox would offer a button that always fails.
+ *
+ * A parked request is therefore asked about a level no step can have, which leaves
+ * `is_hr()` as the only way to answer true. HR's authority still comes from the
+ * predicate rather than being restated here. A routable request is asked about its own
+ * current level, and one with no current level is not asked about at all, because
+ * `approve_leave_request` returns NOT_FOUND for everybody when there is no step at the
+ * level it locks.
+ */
+export function decisionProbeLevel(row: { status: string; current_approval_level: number | null }): number | undefined {
+  if (row.status === "approval_blocked") return NO_APPROVAL_STEP_LEVEL;
+  if (row.current_approval_level === null) return undefined;
+  return row.current_approval_level;
+}
+
 export const LEAVE_TYPE_LABEL: Record<LeaveType, string> = {
   casual: "Casual",
   sick: "Sick",

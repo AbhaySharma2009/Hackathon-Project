@@ -38,14 +38,25 @@ export async function proxy(request: NextRequest) {
     },
   );
 
+  const { pathname } = request.nextUrl;
+  const isLoginRoute = pathname === "/login";
+  const isApiRoute = pathname.startsWith("/api/");
+
+  // The API does not need this gate. Every route under /api opens with
+  // `requireSession`/`requireRole`/`requireAdmin`/`requireSuperAdmin`, which resolve
+  // the same cookie-bound session and reject an absent one — so the check below was
+  // a second trip to the Auth server for a decision nothing downstream relied on.
+  //
+  // It was not merely redundant but wrong for this surface: a redirect is the wrong
+  // answer to a `fetch`, which cannot follow it to a login page. An unauthenticated
+  // API call now gets the route's own JSON 403 instead of a 307 into HTML.
+  if (isApiRoute) return response;
+
   // Triggers a token refresh when the access token is near expiry and writes the
   // new cookies through setAll above.
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  const { pathname } = request.nextUrl;
-  const isLoginRoute = pathname === "/login";
 
   if (!user && !isLoginRoute) {
     const url = request.nextUrl.clone();

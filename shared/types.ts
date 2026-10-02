@@ -798,6 +798,12 @@ export type Database = {
         Args: { p_request_id: string; p_level?: number | null };
         Returns: boolean;
       };
+      // Set-shaped wrapper over the predicate above (Phase 20): one call for a
+      // whole inbox instead of one call per candidate row.
+      can_decide_leave_steps: {
+        Args: { p_targets: { id: string; lvl: number | null }[] };
+        Returns: { request_id: string }[];
+      };
       required_approval_levels_unused_marker: { Args: { p_days: number }; Returns: number };
       get_approval_chain: {
         Args: { p_request_id: string };

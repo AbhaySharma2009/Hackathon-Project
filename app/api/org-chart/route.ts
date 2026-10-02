@@ -13,18 +13,22 @@ export async function GET() {
   try {
     const { supabase } = await requireSession();
 
-    const { data, error } = await supabase.rpc("get_org_tree");
-    if (error) throw error;
+    // Both reads are independent: the tree cuts a cyclic branch to stay finite, so
+    // it is checked separately, and the chart should say when it is showing fewer
+    // people than the company has. Nothing in the health count depends on the
+    // tree, so they are asked together rather than one round trip after another.
+    const [tree, health] = await Promise.all([
+      supabase.rpc("get_org_tree"),
+      supabase.rpc("org_tree_health"),
+    ]);
 
-    // The tree cuts a cyclic branch to stay finite, so it is checked separately:
-    // the chart should say when it is showing fewer people than the company has.
-    const { data: health } = await supabase.rpc("org_tree_health");
+    if (tree.error) throw tree.error;
 
     return NextResponse.json({
-      data: data as OrgNode[],
+      data: tree.data as OrgNode[],
       meta: {
         generated_at: new Date().toISOString(),
-        ...(health as { missing?: number; node_count?: number; active_count?: number } | null),
+        ...(health.data as { missing?: number; node_count?: number; active_count?: number } | null),
       },
     });
   } catch (error) {

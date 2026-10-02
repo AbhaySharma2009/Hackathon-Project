@@ -13,6 +13,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { apiFetch } from "@/shared/api-client";
+import { loadAlertsFeed } from "@/shared/alerts-feed";
 import type { Alert, AlertSeverity, AlertsFeed } from "@/shared/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -100,21 +101,22 @@ export function AlertList({
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState<"all" | "unread" | AlertSeverity>("all");
 
-  const load = useCallback(async (signal?: AbortSignal) => {
-    const response = await apiFetch<{ data: AlertsFeed }>("/api/alerts", { signal });
-    setFeed(response.data);
+  // The alert bell is already in the topbar and reads the same feed on mount, so
+  // this goes through the shared loader rather than issuing a second identical
+  // request. Marking something read does change the feed, so those reloads force
+  // a fresh read.
+  const load = useCallback(async (options: { force?: boolean } = {}) => {
+    setFeed(await loadAlertsFeed(options));
     setError(null);
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    load(controller.signal)
+    load()
       .catch((err: Error) => {
-        if (err.name !== "AbortError") setError(err.message);
+        setError(err.message);
       })
       .finally(() => setLoading(false));
-    return () => controller.abort();
   }, [load]);
 
   async function markAllRead() {
@@ -130,7 +132,7 @@ export function AlertList({
           body: JSON.stringify({ is_read: true }),
         });
       }
-      await load();
+      await load({ force: true });
     } catch {
       /* leave the list as it is; the next refresh reconciles it */
     } finally {
@@ -142,7 +144,7 @@ export function AlertList({
     setBusy(true);
     try {
       await apiFetch(`/api/alerts/${id}`, { method: "PATCH", body: JSON.stringify({ is_read: true }) });
-      await load();
+      await load({ force: true });
     } catch {
       /* a failed write is reconciled on the next refresh */
     } finally {

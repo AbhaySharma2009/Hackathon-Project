@@ -47,11 +47,32 @@ export async function GET() {
     // straight out of the table. `get_employee_detail` is SECURITY DEFINER and
     // returns the full row minus `auth_user_id` for yourself, which is the
     // established way this codebase reads them.
-    const { data: detail, error: detailError } = await supabase.rpc("get_employee_detail", {
-      p_employee_id: employee.id,
-    });
+    //
+    // The three reads below are issued together rather than one after another.
+    // Balances are keyed on the session, and the manager lookup is keyed on the
+    // session's own `manager_id`: `employee` and `detail` are the same row of
+    // the same table, so the manager cannot differ between them. Nothing here
+    // waits on anything else, and each read costs a round trip.
+    const [detailResult, balancesResult, managerResult] = await Promise.all([
+      supabase.rpc("get_employee_detail", {
+        p_employee_id: employee.id,
+      }),
+      // Balances are read from the table, matching /api/leave-balances. RLS limits
+      // this to the caller's own rows, so the page shows exactly the figures the
+      // rest of the app shows — and this route is never a way to write them.
+      supabase
+        .from("leave_balances")
+        .select("leave_type, allocated, used")
+        .eq("employee_id", employee.id)
+        .eq("year", new Date().getFullYear())
+        .order("leave_type"),
+      employee.manager_id
+        ? supabase.from("employees").select("name").eq("id", employee.manager_id).maybeSingle()
+        : null,
+    ]);
 
-    if (detailError) throw detailError;
+    if (detailResult.error) throw detailResult.error;
+    const detail = detailResult.data;
     if (!detail) throw new ApiError("NOT_FOUND", "No employee record is linked to this account.");
 
     const row = detail as unknown as {
@@ -72,25 +93,9 @@ export async function GET() {
       is_active: boolean;
     };
 
-    let managerName: string | null = null;
-    if (row.manager_id) {
-      const { data: manager } = await supabase
-        .from("employees")
-        .select("name")
-        .eq("id", row.manager_id)
-        .maybeSingle();
-      managerName = manager?.name ?? null;
-    }
-
-    // Balances are read from the table, matching /api/leave-balances. RLS limits
-    // this to the caller's own rows, so the page shows exactly the figures the
-    // rest of the app shows — and this route is never a way to write them.
-    const { data: balances } = await supabase
-      .from("leave_balances")
-      .select("leave_type, allocated, used")
-      .eq("employee_id", employee.id)
-      .eq("year", new Date().getFullYear())
-      .order("leave_type");
+    // Only trust the joined name for the manager this record actually names.
+    const managerName =
+      managerResult && row.manager_id === employee.manager_id ? managerResult.data?.name ?? null : null;
 
     return Response.json({
       data: {
@@ -113,7 +118,7 @@ export async function GET() {
           joining_date: row.join_date,
           account_status: row.is_active ? "active" : "inactive",
         },
-        balances: (balances ?? []).map((b) => ({
+        balances: (balancesResult.data ?? []).map((b) => ({
           leave_type: b.leave_type,
           allocated: b.allocated,
           used: b.used,
