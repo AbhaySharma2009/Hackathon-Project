@@ -30,6 +30,22 @@ import {
   TOGGLE_STRIP,
   measureCard,
 } from "@/components/features/org-chart/card-layout";
+import {
+  DEFAULT_TRANSLATE,
+  DEFAULT_ZOOM,
+  MAX_ZOOM,
+  MIN_ZOOM,
+  ROOTS_KEY,
+  ZOOM_STEP,
+  applyCollapse,
+  clampZoom,
+  filterChartTree,
+  fittedZoomFor,
+  fitViewport,
+  initials,
+  toChartNode,
+  type ChartNode,
+} from "@/components/features/org-chart/chart-tree";
 import { PageHeader } from "@/components/design/page-header";
 import { EmptyState, ErrorState } from "@/components/design/states";
 import { LoadingRegion } from "@/components/design/loaders";
@@ -57,72 +73,15 @@ const DEPARTMENT_STYLES: Record<string, { dot: string; text: string }> = {
 const FALLBACK_STYLE = { dot: "bg-slate-500", text: "text-slate-600 dark:text-slate-400" };
 
 /**
- * Zoom limits, shared by the toolbar buttons and the tree's `scaleExtent` so the
- * two can never disagree. The floor is where card text stops being readable —
- * below it the viewer pans instead of zooming out.
+ * Picks the zoom the chart opens at, before it can measure itself. Read once,
+ * lazily: `<Tree>` is not mounted during SSR (the first paint is the loading
+ * skeleton), so the viewport never reaches server-rendered HTML and measuring
+ * here cannot cause a hydration mismatch. `fitToContents` reframes the chart as
+ * soon as the tree is drawn; this is only the first guess, and the fallback if
+ * measuring fails.
  */
-const MIN_ZOOM = 0.45;
-const MAX_ZOOM = 1.8;
-const ZOOM_STEP = 0.15;
-const DEFAULT_ZOOM = 0.85;
-const DEFAULT_TRANSLATE = { x: 400, y: 80 };
-
-/**
- * react-d3-tree's `attributes` is `Record<string, string | number | boolean>`, so
- * a nullable photo URL cannot live there. Empty string means "no photo".
- */
-type ChartNode = {
-  name: string;
-  attributes: {
-    id: string;
-    photo: string;
-    role: string;
-    department: string;
-    reports: number;
-  };
-  children?: ChartNode[];
-};
-
-function toChartNode(node: OrgNode): ChartNode {
-  return {
-    name: node.name,
-    attributes: {
-      id: node.id,
-      photo: node.photo ?? "",
-      role: node.role,
-      department: node.department,
-      reports: node.direct_report_count,
-    },
-    children: node.children?.length ? node.children.map(toChartNode) : undefined,
-  };
-}
-
-function initials(name: string) {
-  return name
-    .split(" ")
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase();
-}
-
-/** Keeps every ancestor of a match, and the match itself, so searching for
- *  "Neha" shows her reporting line rather than a floating node. */
-function filterChartTree(node: ChartNode, search: string): ChartNode | null {
-  const needle = search.trim().toLowerCase();
-  const matches =
-    needle === "" ||
-    node.name.toLowerCase().includes(needle) ||
-    node.attributes.role.toLowerCase().includes(needle);
-
-  const children = (node.children ?? [])
-    .map((child) => filterChartTree(child, needle))
-    .filter((child): child is ChartNode => child !== null);
-
-  // A node survives when it matches itself, or when it is on the path to a match.
-  if (!matches && children.length === 0) return null;
-
-  return { ...node, children: children.length > 0 ? children : undefined };
+function initialZoom(): number {
+  return typeof window === "undefined" ? DEFAULT_ZOOM : fittedZoomFor(window.innerWidth);
 }
 
 export function OrgChartClient() {
@@ -140,18 +99,31 @@ export function OrgChartClient() {
   const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(
     () => new Set<string>(),
   );
-  const [viewport, setViewport] = useState({ zoom: DEFAULT_ZOOM, ...DEFAULT_TRANSLATE });
+  const [viewport, setViewport] = useState(() => ({ zoom: initialZoom(), ...DEFAULT_TRANSLATE }));
+  const [defaultZoom] = useState(initialZoom);
   // Mirrors `viewport` so the zoom handler can compare against the last value it
   // committed without re-creating the callback on every render.
   const viewportRef = useRef(viewport);
+  // Set once the chart has been framed to its contents, and once the viewer has
+  // zoomed or panned by hand — after which the chart stops re-framing itself.
+  const chartHostRef = useRef<HTMLDivElement | null>(null);
+  const hasFitted = useRef(false);
+  const viewerAdjusted = useRef(false);
 
   const load = useCallback(async (signal?: AbortSignal) => {
-    const response = await apiFetch<{
-      data: OrgNode[];
-      meta: { missing?: number };
-    }>("/api/org-chart", { signal });
+    // `apiFetch` yields null when a response body is not JSON at all — a proxy
+    // error page, or a body lost to an aborted read. Reading `.data` off that
+    // threw "Cannot read properties of null" and took the page down, so the
+    // shape is checked here and reported as a normal load failure.
+    const response = await apiFetch<{ data?: OrgNode[]; meta?: { missing?: number } } | null>(
+      "/api/org-chart",
+      { signal },
+    );
+    if (!response || !Array.isArray(response.data)) {
+      throw new Error("The org chart service returned an unreadable response.");
+    }
     setForest(response.data.map(toChartNode));
-    setHealth({ missing: response.meta.missing ?? 0 });
+    setHealth({ missing: response.meta?.missing ?? 0 });
     setError(null);
   }, []);
 
@@ -204,24 +176,15 @@ export function OrgChartClient() {
     return [...found].sort();
   }, [forest]);
 
-  const chartData = useMemo(
-    () =>
-      forest
-        .map((root) => filterChartTree(root, search))
-        .filter((root): root is ChartNode => root !== null)
-        .map(
-          (node): ChartNode =>
-            // Collapse is applied *after* filtering, and always rebuilt from
-            // `forest`, so reopening a branch restores the whole subtree rather
-            // than just the one node that was clicked. While a search is active
-            // the fold state is ignored, otherwise a match could be hidden
-            // inside a branch the viewer had closed.
-            !search && collapsedIds.has(node.attributes.id)
-              ? { ...node, children: undefined }
-              : node,
-        ) as RawNodeDatum[],
-    [forest, search, collapsedIds],
-  );
+  const chartData = useMemo(() => {
+    // While a search is active the fold state is ignored, otherwise a match could
+    // be hidden inside a branch the viewer had closed.
+    const ignoreFold = search.trim().length > 0;
+    return forest
+      .map((root) => filterChartTree(root, search))
+      .filter((root): root is ChartNode => root !== null)
+      .map((root) => applyCollapse(root, collapsedIds, ignoreFold)) as RawNodeDatum[];
+  }, [forest, search, collapsedIds]);
 
   // The seed has a single root, so render it directly. A second root would be
   // drawn on top of the first, so multiple roots are wrapped in a synthetic parent.
@@ -230,17 +193,33 @@ export function OrgChartClient() {
     // `attributes` unconditionally — including the empty state and the synthetic
     // root. A bare `{ name }` is therefore not a valid datum here, and it used to
     // white-screen the page whenever the chart had nothing to draw.
-    const stub = (name: string): ChartNode => ({
+    //
+    // `reports` carries how many roots the wrapper holds. `renderNode` decides
+    // whether to draw the +/− control from that count, so a folded wrapper keeps
+    // its control and can be opened again.
+    const stub = (name: string, reports = 0): ChartNode => ({
       name,
-      attributes: { id: "root", photo: "", role: "", department: "", reports: 0 },
+      attributes: {
+        id: name === "OrgFlow" ? ROOTS_KEY : name,
+        photo: "",
+        role: "",
+        department: "",
+        reports,
+        synthetic: name === "OrgFlow",
+      },
     });
 
     if (chartData.length === 0) {
       return stub(search.trim() ? "No matching employees" : "No employees to show");
     }
     if (chartData.length === 1) return chartData[0];
-    return { ...stub("OrgFlow"), children: chartData };
-  }, [chartData, search]);
+
+    const rootsFolded = collapsedIds.has(ROOTS_KEY);
+    return {
+      ...stub("OrgFlow", chartData.length),
+      children: rootsFolded ? undefined : chartData,
+    };
+  }, [chartData, search, collapsedIds]);
 
   /**
    * Applies a zoom or pan.
@@ -267,6 +246,54 @@ export function OrgChartClient() {
     setViewport(next);
   }, []);
 
+  /**
+   * Frames the whole tree inside the chart's own box.
+   *
+   * `getBBox()` reports the extent in the chart's own coordinates, so it is
+   * unaffected by the zoom already applied to the group — the same tree measures
+   * the same either way, which is what makes re-fitting safe to repeat.
+   */
+  const fitToContents = useCallback(() => {
+    const host = chartHostRef.current;
+    if (!host) return false;
+    const group = host.querySelector<SVGGElement>("g.rd3t-g");
+    const svg = host.querySelector<SVGSVGElement>("svg.rd3t-svg");
+    if (!group || !svg) return false;
+    let box: DOMRect;
+    try {
+      box = group.getBBox();
+    } catch {
+      return false;
+    }
+    // A tree mid-render measures 0x0, and fitting that would jump the view.
+    if (!box.width || !box.height) return false;
+    const container = { width: svg.clientWidth, height: svg.clientHeight };
+    if (!container.width || !container.height) return false;
+    const fit = fitViewport(
+      { x: box.x, y: box.y, width: box.width, height: box.height },
+      container,
+    );
+    updateViewport(fit.zoom, fit.x, fit.y);
+    return true;
+  }, [updateViewport]);
+
+  // Frame the tree once it has something in it, and again if the chart is resized
+  // while the viewer has not taken control of the zoom themselves.
+  useEffect(() => {
+    if (loading || !forest.length) return;
+    const frame = requestAnimationFrame(() => {
+      if (!viewerAdjusted.current) hasFitted.current = fitToContents();
+    });
+    window.addEventListener("resize", onResize);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", onResize);
+    };
+    function onResize() {
+      if (!viewerAdjusted.current && hasFitted.current) fitToContents();
+    }
+  }, [loading, forest, fitToContents]);
+
   const toggleCollapse = useCallback((id: string) => {
     setCollapsedIds((previous) => {
       const next = new Set(previous);
@@ -281,7 +308,7 @@ export function OrgChartClient() {
       // Destructuring a missing `attributes` took down the whole page, so the
       // render path is total: a node the chart cannot describe still draws
       // rather than unmounting the tree.
-      const { id, photo, role, department: dept, reports } = (nodeDatum.attributes ?? {
+      const { id, photo, role, department: dept, reports, synthetic } = (nodeDatum.attributes ?? {
         id: "",
         photo: "",
         role: "",
@@ -289,7 +316,7 @@ export function OrgChartClient() {
         reports: 0,
       }) as ChartNode["attributes"] & Record<string, string | number | boolean>;
       const style = DEPARTMENT_STYLES[dept] ?? FALLBACK_STYLE;
-      const isSelected = selectedId === id;
+      const isSelected = !synthetic && selectedId === id;
       // The department control highlights rather than hides, so the reporting
       // context around a highlighted person stays on screen.
       const inDepartment = department === "all" || dept === department;
@@ -312,11 +339,17 @@ export function OrgChartClient() {
 
       return (
         <g
-          className="of-org-node cursor-pointer"
-          tabIndex={0}
-          role="button"
-          aria-label={`${nodeDatum.name}, ${role}, ${dept}${reports > 0 ? `, ${reports} direct report${reports === 1 ? "" : "s"}` : ""}`}
+          className={synthetic ? "of-org-node" : "of-org-node cursor-pointer"}
+          tabIndex={synthetic ? -1 : 0}
+          role={synthetic ? "group" : "button"}
+          aria-label={
+            synthetic
+              ? `${reports} top-level ${reports === 1 ? "employee" : "employees"}`
+              : `${nodeDatum.name}, ${role}, ${dept}${reports > 0 ? `, ${reports} direct report${reports === 1 ? "" : "s"}` : ""}`
+          }
           onKeyDown={(event) => {
+            // The wrapper stands for no employee, so there is no record to open.
+            if (synthetic) return;
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
               setSelectedId(id);
@@ -325,7 +358,7 @@ export function OrgChartClient() {
           opacity={inDepartment ? 1 : 0.25}
           onClick={(event) => {
             event.stopPropagation();
-            setSelectedId(id);
+            if (!synthetic) setSelectedId(id);
           }}
         >
           {/* The clip has to be declared per node: <Tree> renders into a nested
@@ -527,7 +560,7 @@ export function OrgChartClient() {
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search name or role"
+              placeholder="Search name, role or department"
               className="pl-8"
               aria-label="Search the org chart"
             />
@@ -558,8 +591,9 @@ export function OrgChartClient() {
             // in step with the state; a direct setViewport here would leave the
             // ref stale and the next `onUpdate` would look like a real change.
             onClick={() => {
+              viewerAdjusted.current = true;
               const v = viewportRef.current;
-              updateViewport(Math.min(MAX_ZOOM, v.zoom + ZOOM_STEP), v.x, v.y);
+              updateViewport(clampZoom(v.zoom + ZOOM_STEP), v.x, v.y);
             }}
             aria-label="Zoom in"
           >
@@ -569,10 +603,11 @@ export function OrgChartClient() {
             variant="outline"
             size="icon"
             onClick={() => {
+              viewerAdjusted.current = true;
               const v = viewportRef.current;
               // The floor keeps card text legible: below roughly 0.45 the name stops being
               // readable, so zooming out stops there and the user pans instead.
-              updateViewport(Math.max(MIN_ZOOM, v.zoom - ZOOM_STEP), v.x, v.y);
+              updateViewport(clampZoom(v.zoom - ZOOM_STEP), v.x, v.y);
             }}
             aria-label="Zoom out"
           >
@@ -581,7 +616,14 @@ export function OrgChartClient() {
           <Button
             variant="outline"
             size="icon"
-            onClick={() => updateViewport(DEFAULT_ZOOM, DEFAULT_TRANSLATE.x, DEFAULT_TRANSLATE.y)}
+            onClick={() => {
+              viewerAdjusted.current = false;
+              // Re-frame the tree rather than returning to a hard-coded zoom, so
+              // Reset means "show me everything" on a phone and a desktop alike.
+              if (!fitToContents()) {
+                updateViewport(defaultZoom, DEFAULT_TRANSLATE.x, DEFAULT_TRANSLATE.y);
+              }
+            }}
             aria-label="Reset the view"
           >
             <Maximize2 className="size-4" aria-hidden />
@@ -648,7 +690,20 @@ export function OrgChartClient() {
               />
             </div>
           ) : (
-            <div className="h-[680px] w-full">
+            <div
+              ref={chartHostRef}
+              className="h-[680px] w-full"
+              // Scrolling or dragging is the viewer taking over, after which the
+              // chart stops re-framing itself on resize. Wheel and pointer are
+              // unambiguous user gestures; `onUpdate` is not, because react-d3-tree
+              // also fires it in response to the props this component sets itself.
+              onWheel={() => {
+                viewerAdjusted.current = true;
+              }}
+              onPointerDown={() => {
+                viewerAdjusted.current = true;
+              }}
+            >
               <Tree
                 data={treeData}
                 orientation="vertical"

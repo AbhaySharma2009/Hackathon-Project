@@ -63,7 +63,10 @@ export function PageHeader({
           ) : null}
         </div>
         {actions ? (
-          <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>
+          // `shrink-0` here made the toolbar keep its full intrinsic width, so
+          // `flex-wrap` never got a chance to wrap and the whole page scrolled
+          // sideways on tablet widths. `min-w-0` lets it shrink, and it wraps.
+          <div className="flex min-w-0 flex-wrap items-center gap-2">{actions}</div>
         ) : null}
       </div>
 
