@@ -1,13 +1,27 @@
-import { redirectUnlessRole } from "@/server/auth";
-import { AdminApprovalHierarchyClient } from "@/components/features/admin/admin-approval-hierarchy-client";
+"use client";
 
-/**
- * How many approvers a request of a given length needs, and the thresholds behind it.
- *
- * Admin only; a non-admin is redirected and the matching API refuses the request
- * regardless of what the URL says.
- */
-export default async function Page() {
-  await redirectUnlessRole("admin", "super_admin");
+import { useEmployee } from "@/components/providers/session-provider";
+import { redirect } from "next/navigation";
+import dynamic from "next/dynamic";
+import { LoadingRegion } from "@/components/design/loaders";
+
+const AdminApprovalHierarchyClient = dynamic(
+  () => import("@/components/features/admin/admin-approval-hierarchy-client").then((m) => m.AdminApprovalHierarchyClient),
+  {
+    loading: () => <LoadingRegion label="Loading approval hierarchy" />,
+    ssr: false,
+  },
+);
+
+
+export default function Page() {
+  const employee = useEmployee();
+
+  if (!employee) return null;
+
+  if (!["admin", "super_admin"].includes(employee.app_role)) {
+    redirect("/dashboard");
+  }
+
   return <AdminApprovalHierarchyClient />;
 }

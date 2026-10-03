@@ -1,13 +1,27 @@
-import { redirectUnlessRole } from "@/server/auth";
-import { AdminActivityClient } from "@/components/features/admin/admin-activity-client";
+"use client";
 
-/**
- * Live workflow totals and every AI query the system has answered.
- *
- * Admin only; a non-admin is redirected and the matching API refuses the request
- * regardless of what the URL says.
- */
-export default async function Page() {
-  await redirectUnlessRole("admin", "super_admin");
+import { useEmployee } from "@/components/providers/session-provider";
+import { redirect } from "next/navigation";
+import dynamic from "next/dynamic";
+import { LoadingRegion } from "@/components/design/loaders";
+
+const AdminActivityClient = dynamic(
+  () => import("@/components/features/admin/admin-activity-client").then((m) => m.AdminActivityClient),
+  {
+    loading: () => <LoadingRegion label="Loading admin activity" />,
+    ssr: false,
+  },
+);
+
+
+export default function Page() {
+  const employee = useEmployee();
+
+  if (!employee) return null;
+
+  if (!["admin", "super_admin"].includes(employee.app_role)) {
+    redirect("/dashboard");
+  }
+
   return <AdminActivityClient />;
 }

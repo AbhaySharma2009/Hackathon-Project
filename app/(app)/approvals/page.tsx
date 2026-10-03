@@ -1,12 +1,32 @@
-import { redirectUnlessRole } from "@/server/auth";
-import { ApprovalsClient } from "@/components/features/approvals/approvals-client";
+"use client";
 
-export const metadata = { title: "Approvals" };
+import { useEmployee } from "@/components/providers/session-provider";
+import { redirect } from "next/navigation";
+import dynamic from "next/dynamic";
+import { LoadingRegion, ListSkeleton } from "@/components/design/loaders";
 
-export default async function ApprovalsPage() {
-  // Server-side role check: reaching this route as an employee redirects, even
-  // if the link is crafted by hand. RLS blocks the data either way.
-  await redirectUnlessRole("manager", "hr", "admin", "super_admin");
+const ApprovalsClient = dynamic(
+  () => import("@/components/features/approvals/approvals-client").then((m) => m.ApprovalsClient),
+  {
+    loading: () => (
+      <div className="space-y-6" aria-hidden>
+        <LoadingRegion label="Loading approvals" />
+        <ListSkeleton count={3} />
+      </div>
+    ),
+    ssr: false,
+  },
+);
+
+
+export default function ApprovalsPage() {
+  const employee = useEmployee();
+
+  if (!employee) return null;
+
+  if (!["manager", "hr", "admin", "super_admin"].includes(employee.app_role)) {
+    redirect("/dashboard");
+  }
 
   return <ApprovalsClient />;
 }

@@ -1,20 +1,27 @@
-import { redirectUnlessRole } from "@/server/auth";
-import { SuperAdminConsoleClient } from "@/components/features/super-admin/super-admin-console-client";
+"use client";
 
-export const metadata = { title: "Super Admin Console" };
+import { useEmployee } from "@/components/providers/session-provider";
+import { redirect } from "next/navigation";
+import dynamic from "next/dynamic";
+import { LoadingRegion } from "@/components/design/loaders";
 
-/**
- * The Super Admin landing page.
- *
- * Super Admin only — narrower than `/admin`, which an Admin may reach. A
- * Super Admin is also admitted, since the top tier may do everything an Admin
- * may.
- *
- * `redirectUnlessRole` is a routing convenience, not the control: the page's
- * `/api/super-admin/*` routes repeat the check, and the RPCs behind them call
- * `assert_super_admin_actor`, so a hand-typed URL gains nothing.
- */
-export default async function SuperAdminPage() {
-  await redirectUnlessRole("super_admin");
+const SuperAdminConsoleClient = dynamic(
+  () => import("@/components/features/super-admin/super-admin-console-client").then((m) => m.SuperAdminConsoleClient),
+  {
+    loading: () => <LoadingRegion label="Loading super admin console" />,
+    ssr: false,
+  },
+);
+
+
+export default function SuperAdminPage() {
+  const employee = useEmployee();
+
+  if (!employee) return null;
+
+  if (employee.app_role !== "super_admin") {
+    redirect("/dashboard");
+  }
+
   return <SuperAdminConsoleClient />;
 }

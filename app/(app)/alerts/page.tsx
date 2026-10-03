@@ -1,19 +1,28 @@
-import { redirectUnlessRole } from "@/server/auth";
+"use client";
+
+import { useEmployee } from "@/components/providers/session-provider";
+import dynamic from "next/dynamic";
+import { LoadingRegion } from "@/components/design/loaders";
 import { PageHeader } from "@/components/design/page-header";
-import { AlertList } from "@/components/features/alerts/alert-list";
 
-export const metadata = { title: "Alerts" };
+const AlertList = dynamic(
+  () => import("@/components/features/alerts/alert-list").then((m) => m.AlertList),
+  {
+    loading: () => (
+      <div className="space-y-6" aria-hidden>
+        <LoadingRegion label="Loading alerts" />
+        <PageHeader title="Alerts" />
+      </div>
+    ),
+    ssr: false,
+  },
+);
 
-/**
- * The alert queue for managers and HR.
- *
- * The same feed is behind the notification bell in the topbar, which stays
- * available to every role — this page is the full, filterable list. `/api/alerts`
- * uses `requireSession` and RLS decides the contents, so neither the page gate
- * nor this route widens what anyone sees.
- */
-export default async function AlertsPage() {
-  await redirectUnlessRole("manager", "hr", "admin", "super_admin");
+
+export default function AlertsPage() {
+  const employee = useEmployee();
+
+  if (!employee) return null;
 
   return (
     <div className="space-y-6">

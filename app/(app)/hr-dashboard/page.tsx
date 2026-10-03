@@ -1,17 +1,44 @@
-import { redirectUnlessRole } from "@/server/auth";
-import { HrDashboardClient } from "@/components/features/dashboard/hr-dashboard-client";
+"use client";
 
-/**
- * HR sees organisation-wide figures; a manager sees the same dashboard scoped to
- * their own team. Employees are redirected — and the API rejects them anyway,
- * so hiding the page is a convenience rather than the control.
- */
-export default async function HrDashboardPage() {
-  const employee = await redirectUnlessRole("hr", "admin", "super_admin");
+import { useEmployee } from "@/components/providers/session-provider";
+import { redirect } from "next/navigation";
+import dynamic from "next/dynamic";
+import { LoadingRegion, KpiSkeleton } from "@/components/design/loaders";
 
-  // The role travels down so the page can hide the HR-only Smart HR Query card
-  // from a manager. Hiding it is a convenience; POST /api/ai/hr-query rejects a
-  // non-HR session with FORBIDDEN before the model is ever called, and each
-  // `q_*` function repeats the check in the database.
+const HrDashboardClient = dynamic(
+  () => import("@/components/features/dashboard/hr-dashboard-client").then((m) => m.HrDashboardClient),
+  {
+    loading: () => (
+      <div className="space-y-8" aria-hidden>
+        <LoadingRegion label="Loading HR analytics" />
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
+            <KpiSkeleton key={i} />
+          ))}
+        </div>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <div className="space-y-4">
+            <KpiSkeleton count={4} />
+          </div>
+          <div className="space-y-4">
+            <KpiSkeleton count={4} />
+          </div>
+        </div>
+      </div>
+    ),
+    ssr: false,
+  },
+);
+
+
+export default function HrDashboardPage() {
+  const employee = useEmployee();
+
+  if (!employee) return null;
+
+  if (!["hr", "admin", "super_admin"].includes(employee.app_role)) {
+    redirect("/dashboard");
+  }
+
   return <HrDashboardClient appRole={employee.app_role} />;
 }

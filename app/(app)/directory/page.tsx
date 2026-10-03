@@ -1,14 +1,22 @@
-import { redirect } from "next/navigation";
-import { getCurrentEmployee } from "@/server/auth";
-import { DirectoryClient } from "@/components/features/directory/directory-client";
+"use client";
 
-export const metadata = { title: "Directory" };
+import { useEmployee } from "@/components/providers/session-provider";
+import dynamic from "next/dynamic";
+import { LoadingRegion } from "@/components/design/loaders";
 
-export default async function DirectoryPage() {
-  const employee = await getCurrentEmployee();
-  if (!employee) redirect("/login");
+const DirectoryClient = dynamic(
+  () => import("@/components/features/directory/directory-client").then((m) => m.DirectoryClient),
+  {
+    loading: () => <LoadingRegion label="Loading directory" />,
+    ssr: false,
+  },
+);
 
-  // The role flag only decides which buttons render. The API rejects an
-  // unauthorised call with FORBIDDEN regardless of what the client sends.
+
+export default function DirectoryPage() {
+  const employee = useEmployee();
+
+  if (!employee) return null;
+
   return <DirectoryClient isHr={employee.app_role === "hr"} selfId={employee.id} />;
 }

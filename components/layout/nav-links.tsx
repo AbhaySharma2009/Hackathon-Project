@@ -68,6 +68,19 @@ export function NavLinks({
 }) {
   const pathname = usePathname();
 
+  // Prefetch the route when the user hovers over a link, so the page is ready
+  // when they click. This avoids the "click -> wait for JS -> fetch -> render" delay.
+  const handleMouseEnter = (href: string) => {
+    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+      requestIdleCallback(() => {
+        const link = document.createElement("link");
+        link.rel = "prefetch";
+        link.href = href;
+        document.head.appendChild(link);
+      });
+    }
+  };
+
   return (
     <nav className={cn("flex-1 space-y-6 overflow-y-auto px-3 py-4", className)} aria-label="Main">
       {groups.map(({ group, items }) => (
@@ -85,6 +98,7 @@ export function NavLinks({
                     href={item.href}
                     aria-current={active ? "page" : undefined}
                     onClick={onNavigate}
+                    onMouseEnter={() => handleMouseEnter(item.href)}
                     className={cn(
                       "group/nav relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-nav font-medium transition-[color,background-color] duration-150",
                       active

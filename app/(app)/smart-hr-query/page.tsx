@@ -1,19 +1,36 @@
-import { redirectUnlessRole } from "@/server/auth";
+"use client";
+
+import { useEmployee } from "@/components/providers/session-provider";
+import { redirect } from "next/navigation";
+import dynamic from "next/dynamic";
+import { LoadingRegion } from "@/components/design/loaders";
 import { PageHeader } from "@/components/design/page-header";
-import { SmartHrQueryCard } from "@/components/features/dashboard/smart-hr-query-card";
 
-export const metadata = { title: "Smart HR Query" };
+const SmartHrQueryCard = dynamic(
+  () => import("@/components/features/dashboard/smart-hr-query-card").then((m) => m.SmartHrQueryCard),
+  {
+    loading: () => (
+      <div className="space-y-6" aria-hidden>
+        <LoadingRegion label="Loading Smart HR Query" />
+        <PageHeader
+          title="Smart HR Query"
+          description="Ask a workforce question in plain English and get a table back."
+        />
+      </div>
+    ),
+    ssr: false,
+  },
+);
 
-/**
- * Smart HR Query on its own route.
- *
- * HR only. The gate here is a convenience: `POST /api/ai/hr-query` runs
- * `requireHr()` before anything else, and each `q_*` function repeats the check
- * inside the database, so the fixed-tool catalog is never reachable by a
- * manager or an employee no matter how the request is made.
- */
-export default async function SmartHrQueryPage() {
-  await redirectUnlessRole("hr", "admin", "super_admin");
+
+export default function SmartHrQueryPage() {
+  const employee = useEmployee();
+
+  if (!employee) return null;
+
+  if (!["hr", "admin", "super_admin"].includes(employee.app_role)) {
+    redirect("/dashboard");
+  }
 
   return (
     <div className="space-y-6">
